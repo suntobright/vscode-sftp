@@ -1,0 +1,7 @@
+out
+!i18n/**/out
+node_modules
+.vscode-test/
+*.vsix
+package.nls.*.json
+yarn-error.log

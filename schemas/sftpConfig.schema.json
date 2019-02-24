@@ -1,0 +1,36 @@
+{
+    "type": "object",
+    "properties": {
+        "_comment": {
+            "type": "string"
+        },
+        "host": {
+            "description": "Host name or IP address",
+            "type": "string"
+        },
+        "port": {
+            "description": "Port",
+            "type": "number"
+        },
+        "username": {
+            "description": "User name",
+            "type": "string"
+        },
+        "password": {
+            "description": "Password",
+            "type": "string"
+        },
+        "passphrase": {
+            "description": "Passphrase for private key",
+            "type": "string"
+        },
+        "privateKeyFile": {
+            "description": "Private key file path",
+            "type": "string"
+        }
+    },
+    "anyOf": [
+        { "required": ["host", "username", "password"] },
+        { "required": ["host", "username", "privateKeyFile"] }
+    ]
+}
