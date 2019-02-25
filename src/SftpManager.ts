@@ -203,6 +203,19 @@ export class SftpManager {
         return subFolders;
     }
 
+    private async _promptUserCreateFolder(conn: Conn, curFolder: string): Promise<void> {
+        const folderName: string | undefined = await vscode.window.showInputBox(
+            {
+                prompt: localize('prompt.inputFolderName', "Please input the folder name."),
+                value: 'NewFolder'
+            }
+        );
+
+        if (!isNil(folderName)) {
+            await util.promisify(conn.client, conn.sftp.mkdir.bind(conn.sftp), path.posix.join(curFolder, folderName));
+        }
+    }
+
     private async _promptUserSelectFolder(conn: Conn): Promise<string | undefined> {
         let curFolder: string = await util.promisify<string>(conn.client, conn.sftp.realpath.bind(conn.sftp), '.');
 
@@ -216,6 +229,11 @@ export class SftpManager {
                         description: localize('option.confirmCurrentFolder', "Confirm Current Folder")
                     },
                     { folder: '..', label: '..' },
+                    {
+                        folder: '',
+                        label: '$(file-directory-create)',
+                        description: localize('option.createNewFolder', "Create New Folder")
+                    },
                     ...subFolders.map((folder: { name: string; type: vscode.FileType }) => ({
                         folder: folder.name,
                         label: `${
@@ -236,6 +254,9 @@ export class SftpManager {
                         return curFolder;
                     case '..':
                         curFolder = path.posix.dirname(curFolder);
+                        break;
+                    case '':
+                        await this._promptUserCreateFolder(conn, curFolder);
                         break;
                     default:
                         curFolder = path.posix.join(curFolder, pickItem.folder);

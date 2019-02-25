@@ -14,5 +14,7 @@
     "info.config.validateFailed": "配置信息校验失败，{0}",
     "option.addConfig": "添加新的 SFTP 配置信息",
     "option.confirmCurrentFolder": "确认当前文件夹",
-    "option.removeAllConfig": "删除全部 SFTP 配置信息"
+    "option.createNewFolder": "创建新文件夹",
+    "option.removeAllConfig": "删除全部 SFTP 配置信息",
+    "prompt.inputFolderName": "请输入文件夹名称"
 }
