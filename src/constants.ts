@@ -15,5 +15,5 @@ export const configFileName: string = 'sftpConfig.json';
 export const defaultPort: number = 22;
 export const scheme: string = 'sftp';
 export const helpDocument: string = 'README.md';
-export const watchInterval: number = 1000;
+export const watchInterval: number = 500;
 export const ok: number = 0;

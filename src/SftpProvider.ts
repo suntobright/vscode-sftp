@@ -1,8 +1,5 @@
 'use strict';
 
-//TODO watch move script to init
-//TODO modify stat
-
 import { isEmpty, isNil } from 'lodash';
 import * as match from 'multimatch';
 import * as pEvent from 'p-event';
@@ -103,12 +100,12 @@ export class SftpProvider implements vscode.FileSystemProvider {
     }
 
     private async _withErrorHandling<T>(
-        uri: vscode.Uri,
+        authority: string,
         callback: (conn: Conn) => Promise<T>,
-        errorHandler: (e: Error) => Promise<void>
+        errorHandler: ((e: Error) => Promise<void>) | undefined
     ): Promise<T> {
         try {
-            const conn: Conn = await this._getConn(uri.authority);
+            const conn: Conn = await this._getConn(authority);
             let isClosed: boolean = false;
             conn.client.once('close', () => { isClosed = true; });
 
@@ -121,13 +118,15 @@ export class SftpProvider implements vscode.FileSystemProvider {
             } finally {
                 if (!isClosed) {
                     conn.client.removeAllListeners();
-                    this._returnConn(uri.authority, conn);
+                    this._returnConn(authority, conn);
                 } else {
-                    this._removeOneConn(uri.authority);
+                    this._removeOneConn(authority);
                 }
             }
         } catch (e) {
-            await errorHandler(e);
+            if (!isNil(errorHandler)) {
+                await errorHandler(e);
+            }
             throw e;
         }
     }
@@ -138,7 +137,7 @@ export class SftpProvider implements vscode.FileSystemProvider {
         errorHandler: (e: Error) => Promise<void>
     ): Promise<string> {
         return this._withErrorHandling<string>(
-            uri,
+            uri.authority,
             async (conn: Conn): Promise<string> => {
                 const tempDir: string = path.posix.join(consts.remoteTempFolder, uri.path.replace(/\//g, '\\\\'));
                 const rOpt: string = recursive ? '' : '-maxdepth 1';
@@ -195,7 +194,7 @@ export class SftpProvider implements vscode.FileSystemProvider {
         errorHandler: (e: Error) => Promise<void>
     ): Promise<string> {
         return this._withErrorHandling<string>(
-            uri,
+            uri.authority,
             async (conn: Conn): Promise<string> => {
                 const channel: ssh.ClientChannel = await util.promisify<ssh.ClientChannel>(
                     conn.client,
@@ -259,15 +258,8 @@ export class SftpProvider implements vscode.FileSystemProvider {
 
     public async createDirectory(uri: vscode.Uri): Promise<void> {
         await this._withErrorHandling(
-            uri,
-            async (conn: Conn) => {
-                await util.promisify(conn.client, conn.sftp.mkdir.bind(conn.sftp), uri.path);
-
-                this._emitter.fire([
-                    { type: vscode.FileChangeType.Created, uri },
-                    { type: vscode.FileChangeType.Changed, uri: util.getDirUri(uri) }
-                ]);
-            },
+            uri.authority,
+            async (conn: Conn) => util.promisify(conn.client, conn.sftp.mkdir.bind(conn.sftp), uri.path),
             async (e: Error) => {
                 void vscode.window.showErrorMessage(
                     localize(
@@ -284,7 +276,7 @@ export class SftpProvider implements vscode.FileSystemProvider {
 
     public async delete(uri: vscode.Uri, options: { recursive: boolean }): Promise<void> {
         await this._withErrorHandling(
-            uri,
+            uri.authority,
             async (conn: Conn) => {
                 const channel: ssh.ClientChannel = await util.promisify<ssh.ClientChannel>(
                     conn.client,
@@ -293,11 +285,6 @@ export class SftpProvider implements vscode.FileSystemProvider {
                 );
 
                 await util.retrieveOutput(channel);
-
-                this._emitter.fire([
-                    { type: vscode.FileChangeType.Deleted, uri },
-                    { type: vscode.FileChangeType.Changed, uri: util.getDirUri(uri) }
-                ]);
             },
             async (e: Error) => {
                 void vscode.window.showErrorMessage(
@@ -315,7 +302,7 @@ export class SftpProvider implements vscode.FileSystemProvider {
 
     public async readDirectory(uri: vscode.Uri): Promise<[string, vscode.FileType][]> {
         return this._withErrorHandling<[string, vscode.FileType][]>(
-            uri,
+            uri.authority,
             async (conn: Conn): Promise<[string, vscode.FileType][]> => {
                 const extraCmd: string = this._watchedFolders.filter(
                     (folder: string) => uri.path.startsWith(folder)
@@ -378,7 +365,7 @@ export class SftpProvider implements vscode.FileSystemProvider {
 
     public async readFile(uri: vscode.Uri): Promise<Uint8Array> {
         return this._withErrorHandling<Uint8Array>(
-            uri,
+            uri.authority,
             async (conn: Conn): Promise<Uint8Array> => {
                 return vscode.window.withProgress<Uint8Array>(
                     {
@@ -445,33 +432,21 @@ export class SftpProvider implements vscode.FileSystemProvider {
         }
 
         try {
-            const conn: Conn = await this._getConn(oldUri.authority);
-            let isClosed: boolean = false;
-            conn.client.once('close', () => { isClosed = true; });
-
-            try {
-                if (options.overwrite) {
-                    await this.delete(newUri, { recursive: true });
-                }
-
-                await util.promisify(conn.client, conn.sftp.rename.bind(conn.sftp), oldUri.path, newUri.path);
-
-                this._emitter.fire([
-                    { type: vscode.FileChangeType.Created, uri: newUri },
-                    { type: vscode.FileChangeType.Changed, uri: util.getDirUri(newUri) },
-                    { type: vscode.FileChangeType.Deleted, uri: oldUri },
-                    { type: vscode.FileChangeType.Changed, uri: util.getDirUri(oldUri) }
-                ]);
-            } catch (e) {
-                throw e;
-            } finally {
-                if (!isClosed) {
-                    conn.client.removeAllListeners();
-                    this._returnConn(oldUri.authority, conn);
-                } else {
-                    this._removeOneConn(oldUri.authority);
-                }
+            if (oldUri.authority !== newUri.authority) {
+                throw new Error(localize('error.authority.different', "Authorities different"));
             }
+
+            await this._withErrorHandling(
+                oldUri.authority,
+                async (conn: Conn) => {
+                    if (options.overwrite) {
+                        await this.delete(newUri, { recursive: true });
+                    }
+
+                    await util.promisify(conn.client, conn.sftp.rename.bind(conn.sftp), oldUri.path, newUri.path);
+                },
+                undefined
+            );
         } catch (e) {
             void vscode.window.showErrorMessage(
                 localize(
@@ -490,7 +465,7 @@ export class SftpProvider implements vscode.FileSystemProvider {
 
     public async stat(uri: vscode.Uri): Promise<vscode.FileStat> {
         return this._withErrorHandling<vscode.FileStat>(
-            uri,
+            uri.authority,
             async (conn: Conn): Promise<vscode.FileStat> => {
                 const channel: ssh.ClientChannel = await util.promisify<ssh.ClientChannel>(
                     conn.client,
@@ -566,7 +541,7 @@ export class SftpProvider implements vscode.FileSystemProvider {
         options: { create: boolean; overwrite: boolean }
     ): Promise<void> {
         await this._withErrorHandling<void>(
-            uri,
+            uri.authority,
             async (conn: Conn): Promise<void> => {
                 return vscode.window.withProgress<void>(
                     {
@@ -609,11 +584,6 @@ export class SftpProvider implements vscode.FileSystemProvider {
                                 local.pipe(transform).pipe(remote);
                             }
                         );
-
-                        this._emitter.fire([
-                            { type: vscode.FileChangeType.Created, uri },
-                            { type: vscode.FileChangeType.Changed, uri: util.getDirUri(uri) }
-                        ]);
                     }
                 );
             },

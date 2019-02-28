@@ -2,7 +2,6 @@
 
 import { isNil } from 'lodash';
 import * as pEvent from 'p-event';
-import * as path from 'path';
 import * as ssh from 'ssh2';
 import * as vscode from 'vscode';
 
@@ -12,10 +11,6 @@ export async function sleep(delay: number): Promise<void> {
     return new Promise<void>((resolve: () => void): void => {
         setTimeout(resolve, delay);
     });
-}
-
-export function getDirUri(uri: vscode.Uri): vscode.Uri {
-    return vscode.Uri.parse(`${consts.scheme}://${uri.authority}${path.posix.dirname(uri.path)}`);
 }
 
 export function getFileType(fileTypeDesc: string): vscode.FileType {
