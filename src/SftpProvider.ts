@@ -114,6 +114,9 @@ export class SftpProvider implements vscode.FileSystemProvider {
 
                 return value;
             } catch (e) {
+                if (e.message.includes('Not connected')) {
+                    isClosed = true;
+                }
                 throw e;
             } finally {
                 if (!isClosed) {
@@ -238,7 +241,7 @@ export class SftpProvider implements vscode.FileSystemProvider {
                 return newTimestamp;
             },
             async (e: Error) => {
-                if (!e.message.includes('No such file or directory')) {
+                if (!e.message.includes('No such file or directory') || !e.message.includes(uri.path)) {
                     void errorHandler(e);
                 }
             }
@@ -308,7 +311,7 @@ export class SftpProvider implements vscode.FileSystemProvider {
                     (folder: string) => uri.path.startsWith(folder)
                 ).map(
                     (folder: string) =>
-                        `cd ${path.posix.join(consts.remoteTempFolder, folder.replace(/\//g, '\\\\'))}
+                        `cd ${path.posix.join(consts.remoteTempFolder, folder.replace(/\//g, '\\\\'))} &&
                         find -L ${uri.path} -maxdepth 1 -fprint ${uri.path.replace(/\//g, '\\\\')}`
                 ).join('\n');
 
@@ -493,12 +496,17 @@ export class SftpProvider implements vscode.FileSystemProvider {
                 };
             },
             async (e: Error) => {
-                if (e.message.includes('No such file')) {
-                    return;
+                if (!e.message.includes('No such file')) {
+                    void vscode.window.showErrorMessage(
+                        localize(
+                            'info.stat.failed',
+                            "Stating {0}:{1} failed, {2}",
+                            uri.authority,
+                            uri.path,
+                            e.toString()
+                        )
+                    );
                 }
-                void vscode.window.showErrorMessage(
-                    localize('info.stat.failed', "Stating {0}:{1} failed, {2}", uri.authority, uri.path, e.toString())
-                );
             }
         );
     }
@@ -515,16 +523,27 @@ export class SftpProvider implements vscode.FileSystemProvider {
         let needWatch: boolean = true;
         let timeoutId: NodeJS.Timer;
         let timestamp: string;
+        let watchInterval: number = consts.watchMinInterval;
         const doWatch: () => void = async (): Promise<void> => {
             try {
                 timestamp = isEmpty(timestamp)
                     ? await this._watchInit(uri, options.recursive, errorHandler)
                     : await this._watchInternal(uri, timestamp, options.excludes, errorHandler);
+                watchInterval = consts.watchMinInterval;
             } catch (e) {
-                // pass
-            }
-            if (needWatch) {
-                timeoutId = setTimeout(doWatch, consts.watchInterval);
+                watchInterval *= 2;
+                if (watchInterval > consts.watchMaxInterval) {
+                    watchInterval = consts.watchMaxInterval;
+                }
+                if (e.message.includes('No such file') && e.message.includes(consts.remoteTempFolder)) {
+                    await this._watchInit(uri, options.recursive, errorHandler);
+                    await vscode.commands.executeCommand('workbench.files.action.refreshFilesExplorer');
+                }
+                throw e;
+            } finally {
+                if (needWatch) {
+                    timeoutId = setTimeout(doWatch, watchInterval);
+                }
             }
         };
         timeoutId = setTimeout(doWatch, 0);
