@@ -18,7 +18,7 @@ export function activate(context: vscode.ExtensionContext): void {
 
     command = vscode.commands.registerCommand('sftp.openFolder', async () => {
         try {
-            const uri: vscode.Uri | undefined = await sftpManager.promptUserInputUri();
+            const uri: vscode.Uri | undefined = await sftpManager.promptUserInputUri({ canBeFolder: true });
             if (!isNil(uri)) {
                 await vscode.commands.executeCommand('vscode.openFolder', uri);
             }
@@ -30,9 +30,21 @@ export function activate(context: vscode.ExtensionContext): void {
 
     command = vscode.commands.registerCommand('sftp.addFolder', async () => {
         try {
-            const uri: vscode.Uri | undefined = await sftpManager.promptUserInputUri();
+            const uri: vscode.Uri | undefined = await sftpManager.promptUserInputUri({ canBeFolder: true });
             if (!isNil(uri)) {
                 vscode.workspace.updateWorkspaceFolders(0, 0, { uri });
+            }
+        } catch (e) {
+            void vscode.window.showErrorMessage(e.toString());
+        }
+    });
+    context.subscriptions.push(command);
+
+    command = vscode.commands.registerCommand('sftp.openFile', async () => {
+        try {
+            const uri: vscode.Uri | undefined = await sftpManager.promptUserInputUri({ canBeFile: true });
+            if (!isNil(uri)) {
+                await vscode.commands.executeCommand('vscode.open', uri);
             }
         } catch (e) {
             void vscode.window.showErrorMessage(e.toString());

@@ -1,6 +1,7 @@
 {
     "sftp.openFolder.title": "Open Folder",
     "sftp.addFolder.title": "Add Folder",
+    "sftp.openFile.title": "Open File",
     "sftp.removeConfig.title": "Remove Configuration",
     "sftp.help.title": "Help"
 }

@@ -19,6 +19,7 @@
     "activationEvents": [
         "onCommand:sftp.openFolder",
         "onCommand:sftp.addFolder",
+        "onCommand:sftp.openFile",
         "onCommand:sftp.removeConfig",
         "onCommand:sftp.help",
         "onFileSystem:sftp"
@@ -34,6 +35,11 @@
             {
                 "command": "sftp.addFolder",
                 "title": "%sftp.addFolder.title%",
+                "category": "SFTP"
+            },
+            {
+                "command": "sftp.openFile",
+                "title": "%sftp.openFile.title%",
                 "category": "SFTP"
             },
             {

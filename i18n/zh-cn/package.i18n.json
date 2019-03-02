@@ -1,6 +1,7 @@
 {
-    "sftp.openFolder.title": "打开文件夹", 
-    "sftp.addFolder.title": "添加文件夹", 
-    "sftp.removeConfig.title": "删除配置信息", 
+    "sftp.openFolder.title": "打开文件夹",
+    "sftp.addFolder.title": "添加文件夹",
+    "sftp.openFile.title": "打开文件",
+    "sftp.removeConfig.title": "删除配置信息",
     "sftp.help.title": "帮助文档"
 }

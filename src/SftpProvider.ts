@@ -343,7 +343,7 @@ export class SftpProvider implements vscode.FileSystemProvider {
                 for (const line of output.split('\n')) {
                     const tokens: string[] = line.split(' ');
                     let fileType: vscode.FileType = util.getFileType(tokens[0]);
-                    if (tokens.length === 3) {
+                    if (fileType !== vscode.FileType.Unknown && tokens[2] === 'symbolicLink') {
                         fileType |= vscode.FileType.SymbolicLink;
                     }
 
@@ -484,7 +484,7 @@ export class SftpProvider implements vscode.FileSystemProvider {
 
                 const tokens: string[] = output.split(' ');
                 let fileType: vscode.FileType = util.getFileType(tokens[0]);
-                if (tokens.length === 5) {
+                if (fileType !== vscode.FileType.Unknown && tokens[4] === 'symbolicLink') {
                     fileType |= vscode.FileType.SymbolicLink;
                 }
 
