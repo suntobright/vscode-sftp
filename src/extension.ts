@@ -4,79 +4,44 @@ import { isNil } from 'lodash';
 import * as vscode from 'vscode';
 import * as nls from 'vscode-nls';
 
-nls.config(JSON.parse(process.env.VSCODE_NLS_CONFIG || '{}'))();
+nls.config(JSON.parse(isNil(process.env.VSCODE_NLS_CONFIG) ? '{}' : process.env.VSCODE_NLS_CONFIG))();
 
+import { Commands } from './Commands';
+import { ConfigMap } from './ConfigMap';
+import { ConnPool } from './ConnPool';
 import * as consts from './constants';
-import { SftpManager } from './SftpManager';
-import { SftpProvider } from './SftpProvider';
+import { FsProvider } from './FsProvider';
 
 export function activate(context: vscode.ExtensionContext): void {
 
-    const sftpManager: SftpManager = new SftpManager(context.globalState);
+    const configMap: ConfigMap = new ConfigMap(context.globalState);
 
-    let command: vscode.Disposable;
+    const connPool: ConnPool = new ConnPool(configMap);
+    context.subscriptions.push(connPool);
 
-    command = vscode.commands.registerCommand('sftp.openFolder', async () => {
-        try {
-            const uri: vscode.Uri | undefined = await sftpManager.promptUserInputUri({ canBeFolder: true });
-            if (!isNil(uri)) {
-                await vscode.commands.executeCommand('vscode.openFolder', uri);
-            }
-        } catch (e) {
-            void vscode.window.showErrorMessage(e.toString());
-        }
-    });
-    context.subscriptions.push(command);
-
-    command = vscode.commands.registerCommand('sftp.addFolder', async () => {
-        try {
-            const uri: vscode.Uri | undefined = await sftpManager.promptUserInputUri({ canBeFolder: true });
-            if (!isNil(uri)) {
-                vscode.workspace.updateWorkspaceFolders(0, 0, { uri });
-            }
-        } catch (e) {
-            void vscode.window.showErrorMessage(e.toString());
-        }
-    });
-    context.subscriptions.push(command);
-
-    command = vscode.commands.registerCommand('sftp.openFile', async () => {
-        try {
-            const uri: vscode.Uri | undefined = await sftpManager.promptUserInputUri({ canBeFile: true });
-            if (!isNil(uri)) {
-                await vscode.commands.executeCommand('vscode.open', uri);
-            }
-        } catch (e) {
-            void vscode.window.showErrorMessage(e.toString());
-        }
-    });
-    context.subscriptions.push(command);
-
-    command = vscode.commands.registerCommand('sftp.removeConfig', async () => {
-        try {
-            await sftpManager.promptUserRemoveConfig();
-        } catch (e) {
-            void vscode.window.showErrorMessage(e.toString());
-        }
-    });
-    context.subscriptions.push(command);
-
-    command = vscode.commands.registerCommand('sftp.help', async () => {
-        try {
-            await sftpManager.showHelpDocument(context);
-        } catch (e) {
-            void vscode.window.showErrorMessage(e.toString());
-        }
-    });
-    context.subscriptions.push(command);
-
-    const sftpProvider: SftpProvider = new SftpProvider(sftpManager);
-    context.subscriptions.push(sftpProvider);
-
-    const registeredSftpProvider: vscode.Disposable = vscode.workspace.registerFileSystemProvider(
+    const fsProvider: FsProvider = new FsProvider(connPool);
+    const registeredFsProvider: vscode.Disposable = vscode.workspace.registerFileSystemProvider(
         consts.scheme,
-        sftpProvider,
+        fsProvider,
         { isCaseSensitive: true }
     );
-    context.subscriptions.push(registeredSftpProvider);
+    context.subscriptions.push(registeredFsProvider);
+
+    const commands: Commands = new Commands(configMap, connPool);
+    let command: vscode.Disposable;
+
+    command = vscode.commands.registerCommand('sftp.openFolder', async () => commands.openFolder());
+    context.subscriptions.push(command);
+
+    command = vscode.commands.registerCommand('sftp.addFolder', async () => commands.addFolder());
+    context.subscriptions.push(command);
+
+    command = vscode.commands.registerCommand('sftp.openFile', async () => commands.openFile());
+    context.subscriptions.push(command);
+
+    command = vscode.commands.registerCommand('sftp.removeConfig', async () => commands.removeConfig());
+    context.subscriptions.push(command);
+
+    command = vscode.commands.registerCommand('sftp.help', async () => commands.showHelpDocument(context));
+    context.subscriptions.push(command);
 }

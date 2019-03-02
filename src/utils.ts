@@ -4,14 +4,12 @@ import { isNil } from 'lodash';
 import * as pEvent from 'p-event';
 import * as ssh from 'ssh2';
 import * as vscode from 'vscode';
+import * as nls from 'vscode-nls';
 
 import * as consts from './constants';
+import { Config, Conn } from './interfaces';
 
-export async function sleep(delay: number): Promise<void> {
-    return new Promise<void>((resolve: () => void): void => {
-        setTimeout(resolve, delay);
-    });
-}
+const localize: nls.LocalizeFunc = nls.loadMessageBundle();
 
 export function getFileType(fileTypeDesc: string): vscode.FileType {
     switch (fileTypeDesc.charAt(0)) {
@@ -23,6 +21,21 @@ export function getFileType(fileTypeDesc: string): vscode.FileType {
             return vscode.FileType.SymbolicLink;
         default:
             return vscode.FileType.Unknown;
+    }
+}
+
+export async function getConn(config: Config): Promise<Conn> {
+    const client: ssh.Client = new ssh.Client();
+    try {
+        client.connect(config);
+        await pEvent(client, 'ready');
+
+        const sftp: ssh.SFTPWrapper = await promisify<ssh.SFTPWrapper>(client, client.sftp.bind(client));
+
+        return { client, sftp };
+    } catch (e) {
+        client.end();
+        throw new Error(localize('error.config.connectFailed', "Connecting failed, {0}", e.toString()));
     }
 }
 

@@ -4,24 +4,23 @@ import * as Ajv from 'ajv';
 import * as bytes from 'bytes';
 import * as fs from 'fs-extra';
 import { isEmpty, isNil } from 'lodash';
-import * as pEvent from 'p-event';
 import * as path from 'path';
 import * as ssh from 'ssh2';
 import * as vscode from 'vscode';
 import * as nls from 'vscode-nls';
 
+import { ConfigMap } from './ConfigMap';
+import { ConnPool } from './ConnPool';
 import * as consts from './constants';
-import { Config, ConfigMap, Conn } from './interfaces';
-import * as util from './sftpUtil';
+import { Config, Conn } from './interfaces';
+import * as utils from './utils';
 
 interface FileInfo {
     name: string;
     type: vscode.FileType;
     user: string;
     size: number;
-    readableSize: string;
     mtime: number;
-    readableMtime: string;
 }
 
 const localize: nls.LocalizeFunc = nls.loadMessageBundle();
@@ -45,10 +44,11 @@ function getFileIcon(type: vscode.FileType): string {
     }
 }
 
-export class SftpManager {
-    private readonly _globalState: vscode.Memento;
+export class Commands {
+    private readonly _configMap: ConfigMap;
+    private readonly _connPool: ConnPool;
 
-    private async _promptUserAddConfigAndGetConn(): Promise<{ authority: string | undefined; conn: Conn | undefined }> {
+    private async _promptUserAddConfig(): Promise<string | undefined> {
         const example: Config = {
             comment: localize(
                 'desc.config.hintComment',
@@ -65,7 +65,6 @@ export class SftpManager {
         await vscode.window.showTextDocument(vscode.Uri.file(tempFile), { preview: false });
 
         let authority: string | undefined;
-        let conn: Conn | undefined;
         let isWaitingForChoice: boolean = false;
         await new Promise<void>((resolve: () => void): void => {
             const disposable: vscode.Disposable = vscode.window.onDidChangeVisibleTextEditors(
@@ -129,19 +128,10 @@ export class SftpManager {
                             }
                         }
 
-                        const client: ssh.Client = new ssh.Client();
+                        let conn: Conn;
                         try {
-                            client.connect(config);
-                            await pEvent(client, 'ready');
-
-                            const sftp: ssh.SFTPWrapper = await util.promisify<ssh.SFTPWrapper>(
-                                client,
-                                client.sftp.bind(client)
-                            );
-
-                            conn = { client, sftp };
+                            conn = await utils.getConn(config);
                         } catch (e) {
-                            client.end();
                             void vscode.window.showErrorMessage(
                                 localize('info.config.connectFailed', "Connecting failed, {0}", e.toString())
                             );
@@ -155,9 +145,8 @@ export class SftpManager {
                             authority += `:${config.port}`;
                         }
 
-                        const configMap: ConfigMap = this.getConfigMap();
-                        configMap[authority] = config;
-                        await this.setConfigMap(configMap);
+                        this._connPool.pushConn(authority, conn);
+                        await this._configMap.set(authority, config);
                     }
 
                     disposable.dispose();
@@ -166,32 +155,11 @@ export class SftpManager {
             );
         });
 
-        return { authority, conn };
-    }
-
-    private async _getConn(authority: string): Promise<Conn> {
-        const configMap: ConfigMap = this.getConfigMap();
-        const config: Config | undefined = configMap[authority];
-        if (isNil(config)) {
-            throw new Error(localize('error.config.notFound', "Configuration not found"));
-        }
-
-        const client: ssh.Client = new ssh.Client();
-        try {
-            client.connect(config);
-            await pEvent(client, 'ready');
-
-            const sftp: ssh.SFTPWrapper = await util.promisify<ssh.SFTPWrapper>(client, client.sftp.bind(client));
-
-            return { client, sftp };
-        } catch (e) {
-            client.end();
-            throw new Error(localize('error.config.connectFailed', "Connecting failed, {0}", e.toString()));
-        }
+        return authority;
     }
 
     private async _getSubFiles(conn: Conn, curFolder: string): Promise<FileInfo[]> {
-        const channel: ssh.ClientChannel = await util.promisify<ssh.ClientChannel>(
+        const channel: ssh.ClientChannel = await utils.promisify<ssh.ClientChannel>(
             conn.client,
             conn.client.exec.bind(conn.client),
             `set -euo pipefail
@@ -209,7 +177,7 @@ export class SftpManager {
                 fi
             done`
         );
-        const output: string = await util.retrieveOutput(channel);
+        const output: string = await utils.retrieveOutput(channel);
         if (isEmpty(output)) {
             return [];
         }
@@ -217,7 +185,7 @@ export class SftpManager {
         const subFiles: FileInfo[] = [];
         for (const line of output.split('\n')) {
             const tokens: string[] = line.split(' ');
-            let fileType: vscode.FileType = util.getFileType(tokens[0]);
+            let fileType: vscode.FileType = utils.getFileType(tokens[0]);
             if (fileType !== vscode.FileType.Unknown && tokens[5] === 'symbolicLink') {
                 fileType |= vscode.FileType.SymbolicLink;
             }
@@ -226,9 +194,7 @@ export class SftpManager {
                 type: fileType,
                 user: tokens[1],
                 size: parseFloat(tokens[2]),
-                readableSize: bytes(parseFloat(tokens[2]), { fixedDecimals: true }),
-                mtime: parseFloat(tokens[3]),
-                readableMtime: new Date(parseFloat(tokens[3]) * 1000).toLocaleString()
+                mtime: parseFloat(tokens[3])
             });
         }
 
@@ -244,7 +210,7 @@ export class SftpManager {
         );
 
         if (!isNil(folderName)) {
-            await util.promisify(conn.client, conn.sftp.mkdir.bind(conn.sftp), path.posix.join(curFolder, folderName));
+            await utils.promisify(conn.client, conn.sftp.mkdir.bind(conn.sftp), path.posix.join(curFolder, folderName));
         }
     }
 
@@ -271,13 +237,15 @@ export class SftpManager {
             });
         }
 
-        let curFolder: string = await util.promisify<string>(conn.client, conn.sftp.realpath.bind(conn.sftp), '.');
+        let curFolder: string = await utils.promisify<string>(conn.client, conn.sftp.realpath.bind(conn.sftp), '.');
 
         while (true) {
             let subFiles: FileInfo[] = await this._getSubFiles(conn, curFolder);
             subFiles = subFiles.filter((file: FileInfo) => file.type !== vscode.FileType.Unknown);
             if (isNil(option.canBeFile) || !option.canBeFile) {
-                subFiles = subFiles.filter((file: FileInfo) => file.type & vscode.FileType.Directory);
+                subFiles = subFiles.filter(
+                    (file: FileInfo) => (file.type & vscode.FileType.Directory) === vscode.FileType.Directory
+                );
             }
 
             const pickItem: { name: string; type: vscode.FileType } | undefined = await vscode.window.showQuickPick(
@@ -287,7 +255,15 @@ export class SftpManager {
                         name: file.name,
                         type: file.type,
                         label: `${getFileIcon(file.type)} ${file.name}`,
-                        description: `\t${file.user}\t${file.readableSize}\t${file.readableMtime}\t`
+                        description: [
+                            '',
+                            file.user,
+                            (file.type & vscode.FileType.Directory) === vscode.FileType.Directory
+                                ? ''
+                                : bytes(file.size, { fixedDecimals: true }),
+                            new Date(file.mtime * 1000).toLocaleString(),
+                            ''
+                        ].join('\t')
                     }))
                 ],
                 { placeHolder:  curFolder }
@@ -306,7 +282,7 @@ export class SftpManager {
                         await this._promptUserCreateFolder(conn, curFolder);
                         break;
                     default:
-                        if ((pickItem.type & vscode.FileType.Directory) !== 0) {
+                        if ((pickItem.type & vscode.FileType.Directory) === vscode.FileType.Directory) {
                             curFolder = path.posix.join(curFolder, pickItem.name);
                         } else {
                             return path.posix.join(curFolder, pickItem.name);
@@ -316,78 +292,101 @@ export class SftpManager {
         }
     }
 
-    public constructor(globalState: vscode.Memento) {
-        this._globalState = globalState;
-    }
-
-    public getConfigMap(): ConfigMap {
-        return this._globalState.get<ConfigMap>(consts.configMapKey, {});
-    }
-
-    public async setConfigMap(configMap: ConfigMap): Promise<void> {
-        await this._globalState.update(consts.configMapKey, configMap);
-    }
-
-    public async promptUserInputUri(
+    private async _promptUserInputUri(
         option: { canBeFolder?: boolean; canBeFile?: boolean }
     ): Promise<vscode.Uri | undefined> {
         let authority: string | undefined = await vscode.window.showQuickPick([
             localize('option.addConfig', "Add New SFTP Configuration"),
-            ...Object.keys(this.getConfigMap())
+            ...this._configMap.getAuthorities()
         ]);
-        let conn: Conn | undefined;
         if (authority === localize('option.addConfig', "Add New SFTP Configuration")) {
-            const temp: {
-                authority: string | undefined;
-                conn: Conn | undefined;
-            } = await this._promptUserAddConfigAndGetConn();
-            authority = temp.authority;
-            conn = temp.conn;
+            authority = await this._promptUserAddConfig();
         }
         if (isNil(authority)) {
             return undefined;
         }
 
-        if (isNil(conn)) {
-            conn = await this._getConn(authority);
-        }
+        return this._connPool.withConn<vscode.Uri | undefined>(
+            authority,
+            async (conn: Conn): Promise<vscode.Uri | undefined> => {
+                const path: string | undefined = await this._promptUserSelectPath(conn, option);
+                if (isNil(path)) {
+                    return undefined;
+                }
 
-        try {
-            const path: string | undefined = await this._promptUserSelectPath(conn, option);
-            if (isNil(path)) {
-                return undefined;
-            }
-
-            return vscode.Uri.parse(`${consts.scheme}://${authority}${path}`);
-        } catch (e) {
-            throw e;
-        } finally {
-            conn.client.end();
-        }
+                return vscode.Uri.parse(`${consts.scheme}://${authority}${path}`);
+            },
+            undefined
+        );
     }
 
-    public async promptUserRemoveConfig(): Promise<void> {
+    private async _promptUserRemoveConfig(): Promise<void> {
         const authority: string | undefined = await vscode.window.showQuickPick([
             localize('option.removeAllConfig', "Remove All SFTP Configurations"),
-            ...Object.keys(this.getConfigMap())
+            ...this._configMap.getAuthorities()
         ]);
         if (isNil(authority)) {
             return;
         }
 
-        let configMap: ConfigMap = this.getConfigMap();
         if (authority === localize('option.removeAllConfig', "Remove All SFTP Configurations")) {
-            configMap = {};
+            await this._configMap.clear();
         } else {
-            //tslint:disable-next-line:no-dynamic-delete
-            delete configMap[authority];
+            await this._configMap.remove(authority);
         }
-        await this.setConfigMap(configMap);
+    }
+
+    private async _withErrorHandled<T>(callback: () => Promise<T>): Promise<T | undefined> {
+        try {
+            const value: T = await callback();
+
+            return value;
+        } catch (e) {
+            void vscode.window.showErrorMessage(e.toString());
+        }
+    }
+
+    public constructor(configMap: ConfigMap, connPool: ConnPool) {
+        this._configMap = configMap;
+        this._connPool = connPool;
+    }
+
+    public async openFolder(): Promise<void> {
+        await this._withErrorHandled(async () => {
+            const uri: vscode.Uri | undefined = await this._promptUserInputUri({ canBeFolder: true });
+            if (!isNil(uri)) {
+                await vscode.commands.executeCommand('vscode.openFolder', uri);
+            }
+        });
+    }
+
+    public async addFolder(): Promise<void> {
+        await this._withErrorHandled(async () => {
+            const uri: vscode.Uri | undefined = await this._promptUserInputUri({ canBeFolder: true });
+            if (!isNil(uri)) {
+                vscode.workspace.updateWorkspaceFolders(0, 0, { uri });
+            }
+        });
+    }
+
+    public async openFile(): Promise<void> {
+        await this._withErrorHandled(async () => {
+            const uri: vscode.Uri | undefined = await this._promptUserInputUri({ canBeFile: true });
+            if (!isNil(uri)) {
+                await vscode.commands.executeCommand('vscode.open', uri);
+            }
+        });
+    }
+
+    public async removeConfig(): Promise<void> {
+        await this._withErrorHandled(async () => this._promptUserRemoveConfig());
     }
 
     public async showHelpDocument(context: vscode.ExtensionContext): Promise<void> {
-        const path: string = context.asAbsolutePath(consts.helpDocument);
+        await this._withErrorHandled(async () => {
+            const path: string = context.asAbsolutePath(consts.helpDocument);
 
-        await vscode.commands.executeCommand('markdown.showPreview', vscode.Uri.file(path));
+            await vscode.commands.executeCommand('markdown.showPreview', vscode.Uri.file(path));
+        });
     }
 }

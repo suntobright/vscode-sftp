@@ -13,10 +13,6 @@ export interface Config {
     privateKeyFile?: string;
 }
 
-export interface ConfigMap {
-    [authority: string]: Config | undefined;
-}
-
 export interface Conn {
     client: ssh.Client;
     sftp: ssh.SFTPWrapper;

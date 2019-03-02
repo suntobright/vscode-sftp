@@ -2,7 +2,6 @@
 
 import { isEmpty, isNil } from 'lodash';
 import * as match from 'multimatch';
-import * as pEvent from 'p-event';
 import * as path from 'path';
 import * as ssh from 'ssh2';
 import { Stats } from 'ssh2-streams';
@@ -11,11 +10,11 @@ import * as vscode from 'vscode';
 import * as nls from 'vscode-nls';
 
 import { BufferStream } from './BufferStream';
+import { ConnPool } from './ConnPool';
 import * as consts from './constants';
-import { Config, ConfigMap, Conn } from './interfaces';
-import { SftpManager } from './SftpManager';
-import * as util from './sftpUtil';
+import { Conn } from './interfaces';
 import { SpeedSummary } from './SpeedSummary';
+import * as utils from './utils';
 
 const localize: nls.LocalizeFunc = nls.loadMessageBundle();
 
@@ -32,120 +31,24 @@ function getFileChangeType(desc: string): vscode.FileChangeType {
     }
 }
 
-export class SftpProvider implements vscode.FileSystemProvider {
+export class FsProvider implements vscode.FileSystemProvider {
 
-    private readonly _sftpManager: SftpManager;
-
-    private readonly _connPool: Map<string, { conns: Conn[]; count: number }>;
-
+    private readonly _connPool: ConnPool;
     private readonly _emitter: vscode.EventEmitter<vscode.FileChangeEvent[]>;
-
     private readonly _watchedFolders: string[];
-
-    private async _getConn(authority: string): Promise<Conn> {
-        let conn: Conn | undefined;
-
-        let connQueue: { conns: Conn[]; count: number } = this._connPool.get(authority) || { conns: [], count: 0 };
-        conn = connQueue.conns.pop();
-
-        if (isNil(conn) && connQueue.count < consts.maxConnCount) {
-            const configMap: ConfigMap = this._sftpManager.getConfigMap();
-            const config: Config | undefined = configMap[authority];
-            if (isNil(config)) {
-                throw new Error(localize('error.config.notFound', "Configuration not found"));
-            }
-
-            const client: ssh.Client = new ssh.Client();
-            try {
-                client.connect(config);
-                connQueue.count ++;
-                this._connPool.set(authority, connQueue);
-                await pEvent(client, 'ready');
-
-                const sftp: ssh.SFTPWrapper = await util.promisify<ssh.SFTPWrapper>(client, client.sftp.bind(client));
-
-                conn = { client, sftp };
-            } catch (e) {
-                client.end();
-                this._removeOneConn(authority);
-                throw new Error(localize('error.config.connectFailed', "Connecting failed, {0}", e.toString()));
-            }
-        }
-
-        while (isNil(conn)) {
-            await util.sleep(0);
-            connQueue = this._connPool.get(authority) || { conns: [], count: 0 };
-            conn = connQueue.conns.pop();
-        }
-
-        return conn;
-    }
-
-    private _returnConn(authority: string, conn: Conn): void {
-        const connQueue: { conns: Conn[]; count: number } | undefined = this._connPool.get(authority);
-        if (isNil(connQueue)) {
-            throw new Error(localize('error.connPool.uninitialized', "Conn queue for {0} uninitialized", authority));
-        } else {
-            connQueue.conns.push(conn);
-        }
-    }
-
-    private _removeOneConn(authority: string): void {
-        const connQueue: { conns: Conn[]; count: number } | undefined = this._connPool.get(authority);
-        if (isNil(connQueue)) {
-            throw new Error(localize('error.connPool.uninitialized', "Conn queue for {0} uninitialized", authority));
-        } else {
-            connQueue.count --;
-        }
-    }
-
-    private async _withErrorHandling<T>(
-        authority: string,
-        callback: (conn: Conn) => Promise<T>,
-        errorHandler: ((e: Error) => Promise<void>) | undefined
-    ): Promise<T> {
-        try {
-            const conn: Conn = await this._getConn(authority);
-            let isClosed: boolean = false;
-            conn.client.once('close', () => { isClosed = true; });
-
-            try {
-                const value: T = await callback(conn);
-
-                return value;
-            } catch (e) {
-                if (e.message.includes('Not connected')) {
-                    isClosed = true;
-                }
-                throw e;
-            } finally {
-                if (!isClosed) {
-                    conn.client.removeAllListeners();
-                    this._returnConn(authority, conn);
-                } else {
-                    this._removeOneConn(authority);
-                }
-            }
-        } catch (e) {
-            if (!isNil(errorHandler)) {
-                await errorHandler(e);
-            }
-            throw e;
-        }
-    }
 
     private async _watchInit(
         uri: vscode.Uri,
         recursive: boolean,
         errorHandler: (e: Error) => Promise<void>
     ): Promise<string> {
-        return this._withErrorHandling<string>(
+        return this._connPool.withConn<string>(
             uri.authority,
             async (conn: Conn): Promise<string> => {
                 const tempDir: string = path.posix.join(consts.remoteTempFolder, uri.path.replace(/\//g, '\\\\'));
                 const rOpt: string = recursive ? '' : '-maxdepth 1';
 
-                const channel: ssh.ClientChannel = await util.promisify<ssh.ClientChannel>(
+                const channel: ssh.ClientChannel = await utils.promisify<ssh.ClientChannel>(
                     conn.client,
                     conn.client.exec.bind(conn.client),
                     `set -euo pipefail
@@ -184,7 +87,7 @@ export class SftpProvider implements vscode.FileSystemProvider {
                     cat created | sed 's/$/ created/'\nEOF\n`
                 );
 
-                return util.retrieveOutput(channel);
+                return utils.retrieveOutput(channel);
             },
             errorHandler
         );
@@ -196,17 +99,17 @@ export class SftpProvider implements vscode.FileSystemProvider {
         excludes: string[],
         errorHandler: (e: Error) => Promise<void>
     ): Promise<string> {
-        return this._withErrorHandling<string>(
+        return this._connPool.withConn<string>(
             uri.authority,
             async (conn: Conn): Promise<string> => {
-                const channel: ssh.ClientChannel = await util.promisify<ssh.ClientChannel>(
+                const channel: ssh.ClientChannel = await utils.promisify<ssh.ClientChannel>(
                     conn.client,
                     conn.client.exec.bind(conn.client),
                     `set -euo pipefail
                     cd ${path.posix.join(consts.remoteTempFolder, uri.path.replace(/\//g, '\\\\'))}
                     bash watch.sh '${timestamp}'`
                 );
-                const output: string = await util.retrieveOutput(channel);
+                const output: string = await utils.retrieveOutput(channel);
 
                 let newTimestamp: string = '';
                 let fileChangeEventList: vscode.FileChangeEvent[] = [];
@@ -248,9 +151,8 @@ export class SftpProvider implements vscode.FileSystemProvider {
         );
     }
 
-    public constructor(sftpManager: SftpManager) {
-        this._sftpManager = sftpManager;
-        this._connPool = new Map<string, { conns: Conn[]; count: number }>();
+    public constructor(connPool: ConnPool) {
+        this._connPool = connPool;
         this._emitter = new vscode.EventEmitter<vscode.FileChangeEvent[]>();
         this._watchedFolders = [];
     }
@@ -260,9 +162,9 @@ export class SftpProvider implements vscode.FileSystemProvider {
     }
 
     public async createDirectory(uri: vscode.Uri): Promise<void> {
-        await this._withErrorHandling(
+        await this._connPool.withConn(
             uri.authority,
-            async (conn: Conn) => util.promisify(conn.client, conn.sftp.mkdir.bind(conn.sftp), uri.path),
+            async (conn: Conn) => utils.promisify(conn.client, conn.sftp.mkdir.bind(conn.sftp), uri.path),
             async (e: Error) => {
                 void vscode.window.showErrorMessage(
                     localize(
@@ -278,16 +180,16 @@ export class SftpProvider implements vscode.FileSystemProvider {
     }
 
     public async delete(uri: vscode.Uri, options: { recursive: boolean }): Promise<void> {
-        await this._withErrorHandling(
+        await this._connPool.withConn(
             uri.authority,
             async (conn: Conn) => {
-                const channel: ssh.ClientChannel = await util.promisify<ssh.ClientChannel>(
+                const channel: ssh.ClientChannel = await utils.promisify<ssh.ClientChannel>(
                     conn.client,
                     conn.client.exec.bind(conn.client),
                     `rm -f${options.recursive ? 'r' : ''} ${uri.path}`
                 );
 
-                await util.retrieveOutput(channel);
+                await utils.retrieveOutput(channel);
             },
             async (e: Error) => {
                 void vscode.window.showErrorMessage(
@@ -304,7 +206,7 @@ export class SftpProvider implements vscode.FileSystemProvider {
     }
 
     public async readDirectory(uri: vscode.Uri): Promise<[string, vscode.FileType][]> {
-        return this._withErrorHandling<[string, vscode.FileType][]>(
+        return this._connPool.withConn<[string, vscode.FileType][]>(
             uri.authority,
             async (conn: Conn): Promise<[string, vscode.FileType][]> => {
                 const extraCmd: string = this._watchedFolders.filter(
@@ -315,7 +217,7 @@ export class SftpProvider implements vscode.FileSystemProvider {
                         find -L ${uri.path} -maxdepth 1 -fprint ${uri.path.replace(/\//g, '\\\\')}`
                 ).join('\n');
 
-                const channel: ssh.ClientChannel = await util.promisify<ssh.ClientChannel>(
+                const channel: ssh.ClientChannel = await utils.promisify<ssh.ClientChannel>(
                     conn.client,
                     conn.client.exec.bind(conn.client),
                     `${extraCmd}
@@ -334,7 +236,7 @@ export class SftpProvider implements vscode.FileSystemProvider {
                         fi
                     done`
                 );
-                const output: string = await util.retrieveOutput(channel);
+                const output: string = await utils.retrieveOutput(channel);
                 if (isEmpty(output)) {
                     return [];
                 }
@@ -342,7 +244,7 @@ export class SftpProvider implements vscode.FileSystemProvider {
                 const results: [string, vscode.FileType][] = [];
                 for (const line of output.split('\n')) {
                     const tokens: string[] = line.split(' ');
-                    let fileType: vscode.FileType = util.getFileType(tokens[0]);
+                    let fileType: vscode.FileType = utils.getFileType(tokens[0]);
                     if (fileType !== vscode.FileType.Unknown && tokens[2] === 'symbolicLink') {
                         fileType |= vscode.FileType.SymbolicLink;
                     }
@@ -367,7 +269,7 @@ export class SftpProvider implements vscode.FileSystemProvider {
     }
 
     public async readFile(uri: vscode.Uri): Promise<Uint8Array> {
-        return this._withErrorHandling<Uint8Array>(
+        return this._connPool.withConn<Uint8Array>(
             uri.authority,
             async (conn: Conn): Promise<Uint8Array> => {
                 return vscode.window.withProgress<Uint8Array>(
@@ -380,7 +282,7 @@ export class SftpProvider implements vscode.FileSystemProvider {
                         progress: vscode.Progress<{ increment: number; message: string }>,
                         token: vscode.CancellationToken
                     ): Promise<Uint8Array> => {
-                        const stats: Stats = await util.promisify<Stats>(
+                        const stats: Stats = await utils.promisify<Stats>(
                             conn.client,
                             conn.sftp.stat.bind(conn.sftp),
                             uri.path
@@ -439,14 +341,14 @@ export class SftpProvider implements vscode.FileSystemProvider {
                 throw new Error(localize('error.authority.different', "Authorities different"));
             }
 
-            await this._withErrorHandling(
+            await this._connPool.withConn(
                 oldUri.authority,
                 async (conn: Conn) => {
                     if (options.overwrite) {
                         await this.delete(newUri, { recursive: true });
                     }
 
-                    await util.promisify(conn.client, conn.sftp.rename.bind(conn.sftp), oldUri.path, newUri.path);
+                    await utils.promisify(conn.client, conn.sftp.rename.bind(conn.sftp), oldUri.path, newUri.path);
                 },
                 undefined
             );
@@ -467,10 +369,10 @@ export class SftpProvider implements vscode.FileSystemProvider {
     }
 
     public async stat(uri: vscode.Uri): Promise<vscode.FileStat> {
-        return this._withErrorHandling<vscode.FileStat>(
+        return this._connPool.withConn<vscode.FileStat>(
             uri.authority,
             async (conn: Conn): Promise<vscode.FileStat> => {
-                const channel: ssh.ClientChannel = await util.promisify<ssh.ClientChannel>(
+                const channel: ssh.ClientChannel = await utils.promisify<ssh.ClientChannel>(
                     conn.client,
                     conn.client.exec.bind(conn.client),
                     `set -euo pipefail
@@ -480,10 +382,10 @@ export class SftpProvider implements vscode.FileSystemProvider {
                         echo symbolicLink
                     fi`
                 );
-                const output: string = await util.retrieveOutput(channel);
+                const output: string = await utils.retrieveOutput(channel);
 
                 const tokens: string[] = output.split(' ');
-                let fileType: vscode.FileType = util.getFileType(tokens[0]);
+                let fileType: vscode.FileType = utils.getFileType(tokens[0]);
                 if (fileType !== vscode.FileType.Unknown && tokens[4] === 'symbolicLink') {
                     fileType |= vscode.FileType.SymbolicLink;
                 }
@@ -559,10 +461,10 @@ export class SftpProvider implements vscode.FileSystemProvider {
         content: Uint8Array,
         options: { create: boolean; overwrite: boolean }
     ): Promise<void> {
-        await this._withErrorHandling<void>(
+        await this._connPool.withConn(
             uri.authority,
             async (conn: Conn): Promise<void> => {
-                return vscode.window.withProgress<void>(
+                await vscode.window.withProgress<void>(
                     {
                         cancellable: true,
                         location: vscode.ProgressLocation.Notification,
@@ -618,29 +520,5 @@ export class SftpProvider implements vscode.FileSystemProvider {
                 );
             }
         );
-    }
-
-    public async dispose(): Promise<void> {
-        for (const authority of this._connPool.keys()) {
-            const connQueue: { conns: Conn[] } = this._connPool.get(authority) || { conns: [] };
-
-            if (!isEmpty(connQueue.conns)) {
-                const conn: Conn = connQueue.conns[0];
-
-                try {
-                    const channel: ssh.ClientChannel = await util.promisify<ssh.ClientChannel>(
-                        conn.client,
-                        conn.client.exec.bind(conn.client),
-                        `rm -fr ${consts.remoteTempFolder}`
-                    );
-                    await util.retrieveOutput(channel);
-                } catch (e) {
-                    // pass
-                }
-
-                connQueue.conns.forEach((conn: Conn) => conn.client.end());
-            }
-        }
-        this._connPool.clear();
     }
 }
