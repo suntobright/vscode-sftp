@@ -3,7 +3,17 @@
 import * as vscode from 'vscode';
 
 import * as consts from './constants';
-import { Config } from './interfaces';
+
+export interface Config {
+    comment: string;
+    host: string;
+    port?: number;
+    username: string;
+    password?: string;
+    passphrase?: string;
+    privateKey?: Buffer;
+    privateKeyFile?: string;
+}
 
 interface Configs {
     [authority: string]: Config;

@@ -1,6 +1,7 @@
 'use strict';
 
 import * as bytes from 'bytes';
+import { isEmpty } from 'lodash';
 import { TransformOptions } from 'stream';
 import * as vscode from 'vscode';
 
@@ -16,13 +17,16 @@ export class SpeedSummary implements TransformOptions {
     private lastSpeedUpdatedTime: number;
     private lastReportTime: number;
 
+    private curFile: string;
+    private curFileChanged: boolean;
+
     private readonly progress: vscode.Progress<{ increment?: number; message?: string }>;
 
     private shouldReport(): boolean {
         const now: number = Date.now();
 
         return (now - this.lastReportTime > 100)
-            && (this.getIncrement() > 0 || now - this.lastSpeedUpdatedTime > 1000);
+            && (this.curFileChanged || this.getIncrement() > 0 || now - this.lastSpeedUpdatedTime > 1000);
     }
 
     private getIncrement(): number {
@@ -32,7 +36,7 @@ export class SpeedSummary implements TransformOptions {
     private getSpeed(): number {
         const now: number = Date.now();
         let speed: number = this.lastSpeed;
-        if (now - this.lastSpeedUpdatedTime > 1000) {
+        if (speed === 0 || now - this.lastSpeedUpdatedTime > 1000) {
             speed = this.curBatchSize / (now - this.lastSpeedUpdatedTime) * 1000;
             this.curBatchSize = 0;
             this.lastSpeedUpdatedTime = now;
@@ -54,9 +58,17 @@ export class SpeedSummary implements TransformOptions {
         this.lastSpeedUpdatedTime = Date.now();
         this.lastReportTime = 0;
 
+        this.curFile = '';
+        this.curFileChanged = false;
+
         this.progress = progress;
 
         this.transform = this.transform.bind(this);
+    }
+
+    public setCurFile(file: string): void {
+        this.curFile = file;
+        this.curFileChanged = true;
     }
 
     // tslint:disable-next-line:ban-types
@@ -66,10 +78,13 @@ export class SpeedSummary implements TransformOptions {
         if (this.shouldReport()) {
             this.progress.report({
                 increment: this.getIncrement(),
-                message: `${bytes(this.getSpeed(), { fixedDecimals: true })}/s`
+                message: isEmpty(this.curFile)
+                    ? `${bytes(this.getSpeed(), { fixedDecimals: true })}/s`
+                    : `${bytes(this.getSpeed(), { fixedDecimals: true })}/s ${this.curFile}`
             });
             this.lastPercent += this.getIncrement();
             this.lastReportTime = Date.now();
+            this.curFileChanged = false;
         }
 
         //tslint:disable-next-line:no-null-keyword

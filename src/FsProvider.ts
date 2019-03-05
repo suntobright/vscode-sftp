@@ -3,16 +3,14 @@
 import { isEmpty, isNil } from 'lodash';
 import * as match from 'multimatch';
 import * as path from 'path';
-import * as ssh from 'ssh2';
 import { Stats } from 'ssh2-streams';
 import { Readable, Transform, Writable } from 'stream';
 import * as vscode from 'vscode';
 import * as nls from 'vscode-nls';
 
-import { BufferStream } from './BufferStream';
-import { ConnPool } from './ConnPool';
+import { BufferReadableStream, BufferWritableStream } from './BufferStream';
+import { Conn, ConnPool } from './ConnPool';
 import * as consts from './constants';
-import { Conn } from './interfaces';
 import { SpeedSummary } from './SpeedSummary';
 import * as utils from './utils';
 
@@ -45,49 +43,46 @@ export class FsProvider implements vscode.FileSystemProvider {
         return this._connPool.withConn<string>(
             uri.authority,
             async (conn: Conn): Promise<string> => {
-                const tempDir: string = path.posix.join(consts.remoteTempFolder, uri.path.replace(/\//g, '\\\\'));
+                const tempDir: string = path.posix.join(consts.remoteTempFolder, uri.path.replace(/\//g, '\\'));
                 const rOpt: string = recursive ? '' : '-maxdepth 1';
 
-                const channel: ssh.ClientChannel = await utils.promisify<ssh.ClientChannel>(
+                return utils.exec(
                     conn.client,
-                    conn.client.exec.bind(conn.client),
                     `set -euo pipefail
                     date --rfc-3339=ns
-                    mkdir -p ${tempDir}
-                    cd ${tempDir}
+                    mkdir -p '${tempDir}'
+                    cd '${tempDir}'
                     rm -f *
                     cat > watch.sh << EOF
                     set -euo pipefail
                     timestamp=\\$(date --rfc-3339=ns)
                     echo \\$timestamp
                     > created
-                    find -L ${uri.path} ${rOpt} -type d -newermt "\\$1" ! -newermt "\\$timestamp" |
-                    while read dir; do
+                    find -L '${uri.path}' ${rOpt} -type d -newermt "\\$1" ! -newermt "\\$timestamp" |
+                    while read -r dir; do
                         old=\\\${dir//\\\\//\\\\\\\\}
-                        if [ -e \\$old ]; then
-                            echo \\$dir changed
-                            find -L \\$dir -maxdepth 1 -fprint new
-                            sort \\$old new new | uniq -u |
-                            while read deleted; do
-                                echo \\$deleted deleted
-                                rm "\\\${deleted//\\\\//\\\\\\\\}"* || true
+                        if [ -e "\\$old" ]; then
+                            echo \\$dir//changed
+                            find -L "\\$dir" -maxdepth 1 -fprint new
+                            sort "\\$old" new new | uniq -u |
+                            while read -r deleted; do
+                                echo \\$deleted//deleted
+                                rm -f "\\\${deleted//\\\\//\\\\\\\\}"*
                             done
-                            sort \\$old \\$old new | uniq -u > created
-                            mv new \\$old
+                            sort "\\$old" "\\$old" new | uniq -u > created
+                            mv new "\\$old"
                         fi
                     done
-                    find -L ${uri.path} ${rOpt} ! -type d -newermt "\\$1" ! -newermt "\\$timestamp" > changed
+                    find -L '${uri.path}' ${rOpt} ! -type d -newermt "\\$1" ! -newermt "\\$timestamp" > changed
                     sort created created changed | uniq -u |
-                    while read file; do
+                    while read -r file; do
                         dir=\\\${file%/*}
-                        if [ -e \\\${dir//\\\\//\\\\\\\\} ]; then
-                            echo \\$file changed
+                        if [ -e "\\\${dir//\\\\//\\\\\\\\}" ]; then
+                            echo \\$file//changed
                         fi
                     done
-                    cat created | sed 's/$/ created/'\nEOF\n`
+                    cat created | sed 's/$/\\/\\/created/'\nEOF\n`
                 );
-
-                return utils.retrieveOutput(channel);
             },
             errorHandler
         );
@@ -102,14 +97,12 @@ export class FsProvider implements vscode.FileSystemProvider {
         return this._connPool.withConn<string>(
             uri.authority,
             async (conn: Conn): Promise<string> => {
-                const channel: ssh.ClientChannel = await utils.promisify<ssh.ClientChannel>(
+                const output: string = await utils.exec(
                     conn.client,
-                    conn.client.exec.bind(conn.client),
                     `set -euo pipefail
-                    cd ${path.posix.join(consts.remoteTempFolder, uri.path.replace(/\//g, '\\\\'))}
+                    cd '${path.posix.join(consts.remoteTempFolder, uri.path.replace(/\//g, '\\'))}'
                     bash watch.sh '${timestamp}'`
                 );
-                const output: string = await utils.retrieveOutput(channel);
 
                 let newTimestamp: string = '';
                 let fileChangeEventList: vscode.FileChangeEvent[] = [];
@@ -118,7 +111,7 @@ export class FsProvider implements vscode.FileSystemProvider {
                         newTimestamp = line;
                         continue;
                     }
-                    const tokens: string[] = line.split(' ');
+                    const tokens: string[] = line.split('//');
                     fileChangeEventList.push({
                         uri: vscode.Uri.parse(`${consts.scheme}://${uri.authority}${tokens[0]}`),
                         type: getFileChangeType(tokens[1])
@@ -182,15 +175,7 @@ export class FsProvider implements vscode.FileSystemProvider {
     public async delete(uri: vscode.Uri, options: { recursive: boolean }): Promise<void> {
         await this._connPool.withConn(
             uri.authority,
-            async (conn: Conn) => {
-                const channel: ssh.ClientChannel = await utils.promisify<ssh.ClientChannel>(
-                    conn.client,
-                    conn.client.exec.bind(conn.client),
-                    `rm -f${options.recursive ? 'r' : ''} ${uri.path}`
-                );
-
-                await utils.retrieveOutput(channel);
-            },
+            async (conn: Conn) => utils.exec(conn.client, `rm -f${options.recursive ? 'r' : ''} '${uri.path}'`),
             async (e: Error) => {
                 void vscode.window.showErrorMessage(
                     localize(
@@ -213,37 +198,35 @@ export class FsProvider implements vscode.FileSystemProvider {
                     (folder: string) => uri.path.startsWith(folder)
                 ).map(
                     (folder: string) =>
-                        `cd ${path.posix.join(consts.remoteTempFolder, folder.replace(/\//g, '\\\\'))} &&
-                        find -L ${uri.path} -maxdepth 1 -fprint ${uri.path.replace(/\//g, '\\\\')}`
+                        `cd '${path.posix.join(consts.remoteTempFolder, folder.replace(/\//g, '\\'))}' &&
+                        find -L '${uri.path}' -maxdepth 1 -fprint '${uri.path.replace(/\//g, '\\')}'`
                 ).join('\n');
 
-                const channel: ssh.ClientChannel = await utils.promisify<ssh.ClientChannel>(
+                const output: string = await utils.exec(
                     conn.client,
-                    conn.client.exec.bind(conn.client),
                     `${extraCmd}
                     set -euo pipefail
-                    ls -AHLo --time-style=+ ${uri.path} |
-                    while read type refCount user size file
+                    ls -AHLo --time-style=+ '${uri.path}' |
+                    while read -r type refCount user size file
                     do
                         if [ $type != total ]
                         then
-                            if [ -L ${uri.path}/$file ]
+                            if [ -L "${uri.path}/$file" ]
                             then
-                                echo $type $file symbolicLink
+                                echo $type/$file/symbolicLink
                             else
-                                echo $type $file
+                                echo $type/$file
                             fi
                         fi
                     done`
                 );
-                const output: string = await utils.retrieveOutput(channel);
                 if (isEmpty(output)) {
                     return [];
                 }
 
                 const results: [string, vscode.FileType][] = [];
                 for (const line of output.split('\n')) {
-                    const tokens: string[] = line.split(' ');
+                    const tokens: string[] = line.split('/');
                     let fileType: vscode.FileType = utils.getFileType(tokens[0]);
                     if (fileType !== vscode.FileType.Unknown && tokens[2] === 'symbolicLink') {
                         fileType |= vscode.FileType.SymbolicLink;
@@ -269,19 +252,19 @@ export class FsProvider implements vscode.FileSystemProvider {
     }
 
     public async readFile(uri: vscode.Uri): Promise<Uint8Array> {
-        return this._connPool.withConn<Uint8Array>(
-            uri.authority,
-            async (conn: Conn): Promise<Uint8Array> => {
-                return vscode.window.withProgress<Uint8Array>(
-                    {
-                        cancellable: true,
-                        location: vscode.ProgressLocation.Notification,
-                        title: localize('info.readFile', "Reading file {0}:{1} ...", uri.authority, uri.path)
-                    },
-                    async (
-                        progress: vscode.Progress<{ increment: number; message: string }>,
-                        token: vscode.CancellationToken
-                    ): Promise<Uint8Array> => {
+        return vscode.window.withProgress<Uint8Array>(
+            {
+                cancellable: true,
+                location: vscode.ProgressLocation.Notification,
+                title: localize('info.readFile', "Reading file {0}:{1}", uri.authority, uri.path)
+            },
+            async (
+                progress: vscode.Progress<{ increment: number; message: string }>,
+                token: vscode.CancellationToken
+            ): Promise<Uint8Array> => {
+                return this._connPool.withConn<Uint8Array>(
+                    uri.authority,
+                    async (conn: Conn): Promise<Uint8Array> => {
                         const stats: Stats = await utils.promisify<Stats>(
                             conn.client,
                             conn.sftp.stat.bind(conn.sftp),
@@ -290,42 +273,29 @@ export class FsProvider implements vscode.FileSystemProvider {
 
                         const speedSummary: SpeedSummary = new SpeedSummary(stats.size, progress);
                         const transform: Transform = new Transform(speedSummary);
+
                         const remote: Readable = conn.sftp.createReadStream(uri.path);
+                        const local: BufferWritableStream = new BufferWritableStream();
 
-                        return new Promise<Uint8Array>(
-                            (resolve: (content: Uint8Array) => void, reject: (e: Error) => void): void => {
-                                let error: Error;
-                                const data: Buffer[] = [];
-                                const cancelHandler: vscode.Disposable = token.onCancellationRequested(() => {
-                                    remote.destroy();
-                                });
-                                remote.once('error', (e: Error) => {
-                                    error = e;
-                                    transform.end();
-                                });
-                                transform.on('data', (chunk: Buffer) => {
-                                    data.push(chunk);
-                                });
-                                transform.once('finish', () => {
-                                    cancelHandler.dispose();
-                                    isNil(error) ? resolve(Buffer.concat(data)) : reject(error);
-                                });
+                        conn.client.once('close', () => {
+                            remote.emit('error', new Error(localize('error.conn.closed', "Connection Closed")));
+                        });
 
-                                remote.pipe(transform);
-                            }
+                        await utils.transmit(remote, transform, local, token);
+
+                        return local.getData();
+                    },
+                    async (e: Error) => {
+                        void vscode.window.showErrorMessage(
+                            localize(
+                                'info.readFile.failed',
+                                "Reading file {0}:{1} failed, {2}",
+                                uri.authority,
+                                uri.path,
+                                e.toString()
+                            )
                         );
                     }
-                );
-            },
-            async (e: Error) => {
-                void vscode.window.showErrorMessage(
-                    localize(
-                        'info.readFile.failed',
-                        "Reading file {0}:{1} failed, {2}",
-                        uri.authority,
-                        uri.path,
-                        e.toString()
-                    )
                 );
             }
         );
@@ -372,17 +342,15 @@ export class FsProvider implements vscode.FileSystemProvider {
         return this._connPool.withConn<vscode.FileStat>(
             uri.authority,
             async (conn: Conn): Promise<vscode.FileStat> => {
-                const channel: ssh.ClientChannel = await utils.promisify<ssh.ClientChannel>(
+                const output: string = await utils.exec(
                     conn.client,
-                    conn.client.exec.bind(conn.client),
                     `set -euo pipefail
-                    stat -L --printf='%A %s %Y %Z ' ${uri.path}
-                    if [ -L ${uri.path} ]
+                    stat -L --printf='%A %s %Y %Z ' '${uri.path}'
+                    if [ -L '${uri.path}' ]
                     then
                         echo symbolicLink
                     fi`
                 );
-                const output: string = await utils.retrieveOutput(channel);
 
                 const tokens: string[] = output.split(' ');
                 let fileType: vscode.FileType = utils.getFileType(tokens[0]);
@@ -391,8 +359,8 @@ export class FsProvider implements vscode.FileSystemProvider {
                 }
 
                 return {
-                    ctime: parseFloat(tokens[3]),
-                    mtime: parseFloat(tokens[2]),
+                    ctime: parseFloat(tokens[3]) * 1000,
+                    mtime: parseFloat(tokens[2]) * 1000,
                     size: parseFloat(tokens[1]),
                     type: fileType
                 };
@@ -461,19 +429,19 @@ export class FsProvider implements vscode.FileSystemProvider {
         content: Uint8Array,
         options: { create: boolean; overwrite: boolean }
     ): Promise<void> {
-        await this._connPool.withConn(
-            uri.authority,
-            async (conn: Conn): Promise<void> => {
-                await vscode.window.withProgress<void>(
-                    {
-                        cancellable: true,
-                        location: vscode.ProgressLocation.Notification,
-                        title: localize('info.writeFile', "Writing file {0}:{1} ...", uri.authority, uri.path)
-                    },
-                    async (
-                        progress: vscode.Progress<{ increment: number; message: string }>,
-                        token: vscode.CancellationToken
-                    ): Promise<void> => {
+        await vscode.window.withProgress(
+            {
+                cancellable: true,
+                location: vscode.ProgressLocation.Notification,
+                title: localize('info.writeFile', "Writing file {0}:{1}", uri.authority, uri.path)
+            },
+            async (
+                progress: vscode.Progress<{ increment: number; message: string }>,
+                token: vscode.CancellationToken
+            ) => {
+                await this._connPool.withConn(
+                    uri.authority,
+                    async (conn: Conn) => {
                         let openFlags: string = 'w';
                         if (!options.create) {
                             openFlags = 'r+';
@@ -482,41 +450,28 @@ export class FsProvider implements vscode.FileSystemProvider {
                             openFlags = 'wx';
                         }
                         const remote: Writable = conn.sftp.createWriteStream(uri.path, { flags: openFlags });
-                        const local: BufferStream = new BufferStream(content);
+                        const local: BufferReadableStream = new BufferReadableStream(content);
 
                         const speedSummary: SpeedSummary = new SpeedSummary(content.length, progress);
                         const transform: Transform = new Transform(speedSummary);
 
-                        await new Promise<void>(
-                            (resolve: () => void, reject: (e: Error) => void): void => {
-                                let error: Error;
-                                const cancelHandler: vscode.Disposable = token.onCancellationRequested(() => {
-                                    local.destroy();
-                                });
-                                remote.once('error', (e: Error) => {
-                                    error = e;
-                                    local.destroy();
-                                });
-                                transform.once('finish', () => {
-                                    cancelHandler.dispose();
-                                    isNil(error) ? resolve() : reject(error);
-                                });
+                        conn.client.once('close', () => {
+                            remote.emit('error', new Error(localize('error.conn.closed', "Connection Closed")));
+                        });
 
-                                local.pipe(transform).pipe(remote);
-                            }
+                        await utils.transmit(local, transform, remote, token);
+                    },
+                    async (e: Error) => {
+                        void vscode.window.showErrorMessage(
+                            localize(
+                                'info.writeFile.failed',
+                                "Writing file {0}:{1} failed, {2}",
+                                uri.authority,
+                                uri.path,
+                                e.toString()
+                            )
                         );
                     }
-                );
-            },
-            async (e: Error) => {
-                void vscode.window.showErrorMessage(
-                    localize(
-                        'info.writeFile.failed',
-                        "Writing file {0}:{1} failed, {2}",
-                        uri.authority,
-                        uri.path,
-                        e.toString()
-                    )
                 );
             }
         );

@@ -3,11 +3,13 @@
 import { isNil } from 'lodash';
 import * as pEvent from 'p-event';
 import * as ssh from 'ssh2';
+import { Readable, Transform, Writable } from 'stream';
 import * as vscode from 'vscode';
 import * as nls from 'vscode-nls';
 
+import { Config } from './ConfigMap';
+import { Conn } from './ConnPool';
 import * as consts from './constants';
-import { Config, Conn } from './interfaces';
 
 const localize: nls.LocalizeFunc = nls.loadMessageBundle();
 
@@ -51,7 +53,9 @@ export async function promisify<T>(client: ssh.Client, method: Function, ...args
     });
 }
 
-export async function retrieveOutput(channel: ssh.ClientChannel): Promise<string> {
+export async function exec(client: ssh.Client, command: string): Promise<string> {
+    const channel: ssh.ClientChannel = await promisify(client, client.exec.bind(client), command);
+
     return new Promise<string>((resolve: (output: string) => void, reject: (e: Error) => void): void => {
         const stdout: Buffer[] = [];
         const stderr: Buffer[] = [];
@@ -67,5 +71,39 @@ export async function retrieveOutput(channel: ssh.ClientChannel): Promise<string
         });
 
         channel.end();
+    });
+}
+
+export async function transmit(
+    srcStream: Readable,
+    transform: Transform,
+    dstStream: Writable,
+    token: vscode.CancellationToken
+): Promise<void> {
+    await new Promise<void>((resolve: () => void, reject: (e: Error) => void): void => {
+        const cancelHandler: vscode.Disposable = token.onCancellationRequested(() => {
+            cancelHandler.dispose();
+            srcStream.destroy();
+            transform.end();
+        });
+
+        srcStream.once('error', (e: Error) => {
+            cancelHandler.dispose();
+            srcStream.destroy();
+            transform.end();
+            reject(e);
+        });
+        dstStream.once('error', (e: Error) => {
+            cancelHandler.dispose();
+            srcStream.destroy();
+            dstStream.destroy();
+            reject(e);
+        });
+
+        dstStream.once('close', () => {
+            resolve();
+        });
+
+        srcStream.pipe(transform).pipe(dstStream);
     });
 }

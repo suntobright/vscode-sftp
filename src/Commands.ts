@@ -5,20 +5,21 @@ import * as bytes from 'bytes';
 import * as fs from 'fs-extra';
 import { isEmpty, isNil } from 'lodash';
 import * as path from 'path';
-import * as ssh from 'ssh2';
 import * as vscode from 'vscode';
 import * as nls from 'vscode-nls';
 
-import { ConfigMap } from './ConfigMap';
-import { ConnPool } from './ConnPool';
+// tslint:disable-next-line:no-require-imports
+import open = require('opn');
+
+import { Config, ConfigMap } from './ConfigMap';
+import { Conn, ConnPool } from './ConnPool';
 import * as consts from './constants';
-import { Config, Conn } from './interfaces';
+import { DstInfo, Loader } from './Loader';
 import * as utils from './utils';
 
 interface FileInfo {
     name: string;
     type: vscode.FileType;
-    user: string;
     size: number;
     mtime: number;
 }
@@ -47,6 +48,7 @@ function getFileIcon(type: vscode.FileType): string {
 export class Commands {
     private readonly _configMap: ConfigMap;
     private readonly _connPool: ConnPool;
+    private readonly _loader: Loader;
 
     private async _promptUserAddConfig(): Promise<string | undefined> {
         const example: Config = {
@@ -158,43 +160,40 @@ export class Commands {
         return authority;
     }
 
-    private async _getSubFiles(conn: Conn, curFolder: string): Promise<FileInfo[]> {
-        const channel: ssh.ClientChannel = await utils.promisify<ssh.ClientChannel>(
+    private async _getSubFiles(conn: Conn, folder: string): Promise<FileInfo[]> {
+        const output: string = await utils.exec(
             conn.client,
-            conn.client.exec.bind(conn.client),
             `set -euo pipefail
-            ls -AHLo --time-style=+%s --group-directories-first ${curFolder} |
-            while read type refCount user size time file
+            ls -AgHLo --time-style=+%s --group-directories-first '${folder}' |
+            while read -r type refCount size mtime file
             do
                 if [ $type != total ]
                 then
-                    if [ -L ${curFolder}/$file ]
+                    if [ -L “${folder}/$file” ]
                     then
-                        echo $type $user $size $time $file symbolicLink
+                        echo $type/$size/$mtime/$file/symbolicLink
                     else
-                        echo $type $user $size $time $file
+                        echo $type/$size/$mtime/$file
                     fi
                 fi
             done`
         );
-        const output: string = await utils.retrieveOutput(channel);
         if (isEmpty(output)) {
             return [];
         }
 
         const subFiles: FileInfo[] = [];
         for (const line of output.split('\n')) {
-            const tokens: string[] = line.split(' ');
+            const tokens: string[] = line.split('/');
             let fileType: vscode.FileType = utils.getFileType(tokens[0]);
-            if (fileType !== vscode.FileType.Unknown && tokens[5] === 'symbolicLink') {
+            if (fileType !== vscode.FileType.Unknown && tokens[4] === 'symbolicLink') {
                 fileType |= vscode.FileType.SymbolicLink;
             }
             subFiles.push({
-                name: tokens[4],
+                name: tokens[3],
                 type: fileType,
-                user: tokens[1],
-                size: parseFloat(tokens[2]),
-                mtime: parseFloat(tokens[3])
+                size: parseFloat(tokens[1]),
+                mtime: parseFloat(tokens[2])
             });
         }
 
@@ -255,15 +254,11 @@ export class Commands {
                         name: file.name,
                         type: file.type,
                         label: `${getFileIcon(file.type)} ${file.name}`,
-                        description: [
-                            '',
-                            file.user,
-                            (file.type & vscode.FileType.Directory) === vscode.FileType.Directory
-                                ? ''
-                                : bytes(file.size, { fixedDecimals: true }),
-                            new Date(file.mtime * 1000).toLocaleString(),
-                            ''
-                        ].join('\t')
+                        description: `${new Date(file.mtime * 1000).toLocaleString()}${
+                            (file.type & vscode.FileType.File) === vscode.FileType.File
+                                ? `        ${bytes(file.size, { fixedDecimals: true })}`
+                                : ''
+                        }`
                     }))
                 ],
                 { placeHolder:  curFolder }
@@ -342,13 +337,14 @@ export class Commands {
 
             return value;
         } catch (e) {
-            void vscode.window.showErrorMessage(e.toString());
+            void vscode.window.showErrorMessage(e.stack);
         }
     }
 
     public constructor(configMap: ConfigMap, connPool: ConnPool) {
         this._configMap = configMap;
         this._connPool = connPool;
+        this._loader = new Loader(connPool);
     }
 
     public async openFolder(): Promise<void> {
@@ -374,6 +370,92 @@ export class Commands {
             const uri: vscode.Uri | undefined = await this._promptUserInputUri({ canBeFile: true });
             if (!isNil(uri)) {
                 await vscode.commands.executeCommand('vscode.open', uri);
+            }
+        });
+    }
+
+    public async download(): Promise<void> {
+        await this._withErrorHandled(async () => {
+            const srcUri: vscode.Uri | undefined = await this._promptUserInputUri({
+                canBeFile: true,
+                canBeFolder: true
+            });
+            if (isNil(srcUri)) {
+                return;
+            }
+
+            const dstFolderUris: vscode.Uri[] | undefined = await vscode.window.showOpenDialog({
+                canSelectFiles: false,
+                canSelectFolders: true,
+                canSelectMany: false,
+                openLabel: localize('button.saveIn', "Save In")
+            });
+            if (isNil(dstFolderUris) || isEmpty(dstFolderUris)) {
+                return;
+            }
+
+            const dst: DstInfo | undefined = await this._loader.download(srcUri, dstFolderUris[0]);
+            if (!isNil(dst)) {
+                void vscode.window.showInformationMessage(
+                    localize(
+                        'info.download.finished',
+                        "Downloaded {0}:{1} as {2}.",
+                        srcUri.authority,
+                        srcUri.path,
+                        dst.uri.fsPath
+                    ),
+                    localize('action.openInVSCode', "Open In VS Code"),
+                    localize('action.revealInFolder', "Reveal In Folder")
+                ).then((choice: string | undefined) => {
+                    if (choice === localize('action.openInVSCode', "Open In VS Code")) {
+                        void vscode.commands.executeCommand(
+                            dst.type === vscode.FileType.File ? 'vscode.open' : 'vscode.openFolder',
+                            dst.uri
+                        );
+                    } else if (choice === localize('action.revealInFolder', "Reveal In Folder")) {
+                        void open(dstFolderUris[0].fsPath);
+                    }
+                });
+            }
+        });
+    }
+
+    public async upload(): Promise<void> {
+        await this._withErrorHandled(async () => {
+            const srcUris: vscode.Uri[] | undefined = await vscode.window.showOpenDialog({
+                canSelectFiles: true,
+                canSelectFolders: true,
+                canSelectMany: false,
+                openLabel: localize('button.upload', "Upload")
+            });
+            if (isNil(srcUris) || isEmpty(srcUris)) {
+                return;
+            }
+
+            const dstFolderUri: vscode.Uri | undefined = await this._promptUserInputUri({ canBeFolder: true });
+            if (isNil(dstFolderUri)) {
+                return;
+            }
+
+            const dst: DstInfo | undefined = await this._loader.upload(srcUris[0], dstFolderUri);
+            if (!isNil(dst)) {
+                void vscode.window.showInformationMessage(
+                    localize(
+                        'info.upload.finished',
+                        "Uploaded {0} as {1}:{2}.",
+                        srcUris[0].fsPath,
+                        dst.uri.authority,
+                        dst.uri.path
+                    ),
+                    localize('action.openInVSCode', "Open In VS Code")
+                ).then((choice: string | undefined) => {
+                    if (choice === localize('action.openInVSCode', "Open In VS Code")) {
+                        void vscode.commands.executeCommand(
+                            dst.type === vscode.FileType.File ? 'vscode.open' : 'vscode.openFolder',
+                            dst.uri
+                        );
+                    }
+                });
             }
         });
     }

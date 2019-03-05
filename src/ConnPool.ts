@@ -4,10 +4,14 @@ import { isNil } from 'lodash';
 import * as ssh from 'ssh2';
 import * as nls from 'vscode-nls';
 
-import { ConfigMap } from './ConfigMap';
+import { Config, ConfigMap } from './ConfigMap';
 import * as consts from './constants';
-import { Config, Conn } from './interfaces';
 import * as utils from './utils';
+
+export interface Conn {
+    client: ssh.Client;
+    sftp: ssh.SFTPWrapper;
+}
 
 interface ConnQueue {
     conns: Conn[];
@@ -112,15 +116,7 @@ export class ConnPool {
             try {
                 await this.withConn(
                     authority,
-                    async (conn: Conn) => {
-                        const channel: ssh.ClientChannel = await utils.promisify(
-                            conn.client,
-                            conn.client.exec.bind(conn.client),
-                            `rm -fr ${consts.remoteTempFolder}`
-                        );
-
-                        await utils.retrieveOutput(channel);
-                    },
+                    async (conn: Conn) => utils.exec(conn.client, `rm -fr '${consts.remoteTempFolder}'`),
                     undefined
                 );
             } catch (e) {

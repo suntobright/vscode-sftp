@@ -39,6 +39,12 @@ export function activate(context: vscode.ExtensionContext): void {
     command = vscode.commands.registerCommand('sftp.openFile', async () => commands.openFile());
     context.subscriptions.push(command);
 
+    command = vscode.commands.registerCommand('sftp.download', async () => commands.download());
+    context.subscriptions.push(command);
+
+    command = vscode.commands.registerCommand('sftp.upload', async () => commands.upload());
+    context.subscriptions.push(command);
+
     command = vscode.commands.registerCommand('sftp.removeConfig', async () => commands.removeConfig());
     context.subscriptions.push(command);
 
