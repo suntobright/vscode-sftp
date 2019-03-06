@@ -65,6 +65,27 @@
                 "category": "SFTP"
             }
         ],
+        "menus": {
+            "explorer/context": [
+                {
+                    "command": "sftp.download",
+                    "when": "resourceScheme == sftp",
+                    "group": "sftp"
+                },
+                {
+                    "command": "sftp.upload",
+                    "when": "resourceScheme == sftp && explorerResourceIsFolder",
+                    "group": "sftp"
+                }
+            ],
+            "editor/context": [
+                {
+                    "command": "sftp.download",
+                    "when": "resourceScheme == sftp",
+                    "group": "sftp"
+                }
+            ]
+        },
         "jsonValidation": [
             {
                 "fileMatch": "sftpConfig.json",

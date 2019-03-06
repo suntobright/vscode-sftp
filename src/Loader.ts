@@ -2,6 +2,7 @@
 
 import * as fs from 'fs-extra';
 import { isEmpty } from 'lodash';
+import * as os from 'os';
 import * as path from 'path';
 import { Readable, Transform, Writable } from 'stream';
 import * as vscode from 'vscode';
@@ -57,8 +58,9 @@ export class Loader {
         const output: string = await utils.exec(
             conn.client,
             `set -euo pipefail
-            ls -AgHLo --time-style=+ '${folder}' |
-            while read -r type refCount size file
+            output=$(ls -AgHLo --time-style=+%s '${folder}') || true
+            echo "$output" |
+            while read -r type refCount size mtime file
             do
                 if [ $type != total ]
                 then
@@ -120,15 +122,24 @@ export class Loader {
                     break;
                 case vscode.FileType.File | vscode.FileType.SymbolicLink:
                 case vscode.FileType.Directory | vscode.FileType.SymbolicLink:
+                case vscode.FileType.Unknown | vscode.FileType.SymbolicLink:
                     const targetPath: string = path.posix.isAbsolute(subFileInfo.target)
                         ? path.posix.resolve(srcFolder, subFileInfo.target)
                         : subFileInfo.target;
-                    await fs.symlink(
-                        path.join(...targetPath.split(path.posix.sep)),
-                        dstSubPath,
-                        (subFileInfo.type & vscode.FileType.File) === vscode.FileType.File ? 'file' : 'dir'
-                    );
-                    break;
+                    if (os.platform() === 'win32'
+                        && subFileInfo.type !== (vscode.FileType.Unknown | vscode.FileType.SymbolicLink)
+                    ) {
+                        await fs.symlink(
+                            path.join(...targetPath.split(path.posix.sep)),
+                            dstSubPath,
+                            (subFileInfo.type & vscode.FileType.File) === vscode.FileType.File ? 'file' : 'dir'
+                        );
+                        break;
+                    } else if (os.platform() !== 'win32') {
+                        await fs.symlink(path.join(...targetPath.split(path.posix.sep)), dstSubPath);
+                        break;
+                    }
+                // tslint:disable-next-line:no-switch-case-fall-through
                 default:
                     void vscode.window.showWarningMessage(
                         localize(

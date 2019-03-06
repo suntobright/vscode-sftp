@@ -164,7 +164,8 @@ export class Commands {
         const output: string = await utils.exec(
             conn.client,
             `set -euo pipefail
-            ls -AgHLo --time-style=+%s --group-directories-first '${folder}' |
+            output=$(ls -AgHLo --time-style=+%s --group-directories-first '${folder}') || true
+            echo "$output" |
             while read -r type refCount size mtime file
             do
                 if [ $type != total ]
@@ -240,7 +241,9 @@ export class Commands {
 
         while (true) {
             let subFiles: FileInfo[] = await this._getSubFiles(conn, curFolder);
-            subFiles = subFiles.filter((file: FileInfo) => file.type !== vscode.FileType.Unknown);
+            subFiles = subFiles.filter((file: FileInfo) =>
+                file.type !== vscode.FileType.Unknown && file.type !== vscode.FileType.SymbolicLink
+            );
             if (isNil(option.canBeFile) || !option.canBeFile) {
                 subFiles = subFiles.filter(
                     (file: FileInfo) => (file.type & vscode.FileType.Directory) === vscode.FileType.Directory
@@ -347,41 +350,53 @@ export class Commands {
         this._loader = new Loader(connPool);
     }
 
-    public async openFolder(): Promise<void> {
+    public async openFolder(uri: vscode.Uri | undefined): Promise<void> {
         await this._withErrorHandled(async () => {
-            const uri: vscode.Uri | undefined = await this._promptUserInputUri({ canBeFolder: true });
+            if (isNil(uri)) {
+                // tslint:disable-next-line:no-parameter-reassignment
+                uri = await this._promptUserInputUri({ canBeFolder: true });
+            }
             if (!isNil(uri)) {
                 await vscode.commands.executeCommand('vscode.openFolder', uri);
             }
         });
     }
 
-    public async addFolder(): Promise<void> {
+    public async addFolder(uri: vscode.Uri | undefined): Promise<void> {
         await this._withErrorHandled(async () => {
-            const uri: vscode.Uri | undefined = await this._promptUserInputUri({ canBeFolder: true });
+            if (isNil(uri)) {
+                // tslint:disable-next-line:no-parameter-reassignment
+                uri = await this._promptUserInputUri({ canBeFolder: true });
+            }
             if (!isNil(uri)) {
                 vscode.workspace.updateWorkspaceFolders(0, 0, { uri });
             }
         });
     }
 
-    public async openFile(): Promise<void> {
+    public async openFile(uri: vscode.Uri | undefined): Promise<void> {
         await this._withErrorHandled(async () => {
-            const uri: vscode.Uri | undefined = await this._promptUserInputUri({ canBeFile: true });
+            if (isNil(uri)) {
+                // tslint:disable-next-line:no-parameter-reassignment
+                uri = await this._promptUserInputUri({ canBeFile: true });
+            }
             if (!isNil(uri)) {
                 await vscode.commands.executeCommand('vscode.open', uri);
             }
         });
     }
 
-    public async download(): Promise<void> {
+    public async download(srcUri: vscode.Uri | undefined): Promise<void> {
         await this._withErrorHandled(async () => {
-            const srcUri: vscode.Uri | undefined = await this._promptUserInputUri({
-                canBeFile: true,
-                canBeFolder: true
-            });
             if (isNil(srcUri)) {
-                return;
+                // tslint:disable-next-line:no-parameter-reassignment
+                srcUri = await this._promptUserInputUri({
+                    canBeFile: true,
+                    canBeFolder: true
+                });
+                if (isNil(srcUri)) {
+                    return;
+                }
             }
 
             const dstFolderUris: vscode.Uri[] | undefined = await vscode.window.showOpenDialog({
@@ -420,7 +435,7 @@ export class Commands {
         });
     }
 
-    public async upload(): Promise<void> {
+    public async upload(dstFolderUri: vscode.Uri | undefined): Promise<void> {
         await this._withErrorHandled(async () => {
             const srcUris: vscode.Uri[] | undefined = await vscode.window.showOpenDialog({
                 canSelectFiles: true,
@@ -432,9 +447,12 @@ export class Commands {
                 return;
             }
 
-            const dstFolderUri: vscode.Uri | undefined = await this._promptUserInputUri({ canBeFolder: true });
             if (isNil(dstFolderUri)) {
-                return;
+                // tslint:disable-next-line:no-parameter-reassignment
+                dstFolderUri = await this._promptUserInputUri({ canBeFolder: true });
+                if (isNil(dstFolderUri)) {
+                    return;
+                }
             }
 
             const dst: DstInfo | undefined = await this._loader.upload(srcUris[0], dstFolderUri);

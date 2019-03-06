@@ -58,22 +58,24 @@ export class FsProvider implements vscode.FileSystemProvider {
                     timestamp=\\$(date --rfc-3339=ns)
                     echo \\$timestamp
                     > created
-                    find -L '${uri.path}' ${rOpt} -type d -newermt "\\$1" ! -newermt "\\$timestamp" |
+                    find -L '${uri.path}' ${rOpt} -type d -newermt "\\$1" ! -newermt "\\$timestamp" -fprint dir || true
+                    cat dir |
                     while read -r dir; do
                         old=\\\${dir//\\\\//\\\\\\\\}
                         if [ -e "\\$old" ]; then
                             echo \\$dir//changed
-                            find -L "\\$dir" -maxdepth 1 -fprint new
+                            find -L "\\$dir" -maxdepth 1 -fprint new || true
                             sort "\\$old" new new | uniq -u |
                             while read -r deleted; do
                                 echo \\$deleted//deleted
                                 rm -f "\\\${deleted//\\\\//\\\\\\\\}"*
                             done
-                            sort "\\$old" "\\$old" new | uniq -u > created
+                            sort "\\$old" "\\$old" new | uniq -u >> created
                             mv new "\\$old"
                         fi
                     done
-                    find -L '${uri.path}' ${rOpt} ! -type d -newermt "\\$1" ! -newermt "\\$timestamp" > changed
+                    find -L '${uri.path}' ${rOpt} ! -type d -newermt "\\$1" ! -newermt "\\$timestamp" -fprint changed \
+                    || true
                     sort created created changed | uniq -u |
                     while read -r file; do
                         dir=\\\${file%/*}
@@ -206,8 +208,9 @@ export class FsProvider implements vscode.FileSystemProvider {
                     conn.client,
                     `${extraCmd}
                     set -euo pipefail
-                    ls -AHLo --time-style=+ '${uri.path}' |
-                    while read -r type refCount user size file
+                    output=$(ls -AHLo --time-style=+%s '${uri.path}') || true
+                    echo "$output" |
+                    while read -r type refCount user size mtime file
                     do
                         if [ $type != total ]
                         then

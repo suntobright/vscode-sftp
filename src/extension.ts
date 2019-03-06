@@ -30,19 +30,34 @@ export function activate(context: vscode.ExtensionContext): void {
     const commands: Commands = new Commands(configMap, connPool);
     let command: vscode.Disposable;
 
-    command = vscode.commands.registerCommand('sftp.openFolder', async () => commands.openFolder());
+    command = vscode.commands.registerCommand(
+        'sftp.openFolder',
+        async (uri: vscode.Uri | undefined) => commands.openFolder(uri)
+    );
     context.subscriptions.push(command);
 
-    command = vscode.commands.registerCommand('sftp.addFolder', async () => commands.addFolder());
+    command = vscode.commands.registerCommand(
+        'sftp.addFolder',
+        async (uri: vscode.Uri | undefined) => commands.addFolder(uri)
+    );
     context.subscriptions.push(command);
 
-    command = vscode.commands.registerCommand('sftp.openFile', async () => commands.openFile());
+    command = vscode.commands.registerCommand(
+        'sftp.openFile',
+        async (uri: vscode.Uri | undefined) => commands.openFile(uri)
+    );
     context.subscriptions.push(command);
 
-    command = vscode.commands.registerCommand('sftp.download', async () => commands.download());
+    command = vscode.commands.registerCommand(
+        'sftp.download',
+        async (srcUri: vscode.Uri | undefined) => commands.download(srcUri)
+    );
     context.subscriptions.push(command);
 
-    command = vscode.commands.registerCommand('sftp.upload', async () => commands.upload());
+    command = vscode.commands.registerCommand(
+        'sftp.upload',
+        async (dstFolderUri: vscode.Uri | undefined) => commands.upload(dstFolderUri)
+    );
     context.subscriptions.push(command);
 
     command = vscode.commands.registerCommand('sftp.removeConfig', async () => commands.removeConfig());
