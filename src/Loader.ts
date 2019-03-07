@@ -8,7 +8,7 @@ import { Readable, Transform, Writable } from 'stream';
 import * as vscode from 'vscode';
 import * as nls from 'vscode-nls';
 
-import { Conn, ConnPool } from "./ConnPool";
+import { Conn, ConnPool } from './ConnPool';
 import { SpeedSummary } from './SpeedSummary';
 import * as utils from './utils';
 
@@ -267,7 +267,7 @@ export class Loader {
                 cancellable: true,
                 location: vscode.ProgressLocation.Notification,
                 title: localize(
-                    'info.downloading',
+                    'info.download',
                     "Downloading {0}:{1} into {2}",
                     srcUri.authority,
                     srcUri.path,
@@ -342,7 +342,7 @@ export class Loader {
                 cancellable: true,
                 location: vscode.ProgressLocation.Notification,
                 title: localize(
-                    'info.uploading',
+                    'info.upload',
                     "Uploading {0} into {1}:{2}",
                     srcUri.fsPath, dstFolderUri.authority, dstFolderUri.path)
             },

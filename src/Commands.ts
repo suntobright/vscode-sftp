@@ -233,7 +233,7 @@ export class Commands {
                 name: '',
                 type: vscode.FileType.Unknown,
                 label: '$(file-directory-create)',
-                description: localize('option.createNewFolder', "Create New Folder")
+                description: localize('option.createFolder', "Create New Folder")
             });
         }
 

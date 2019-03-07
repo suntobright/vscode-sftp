@@ -1,20 +1,32 @@
 {
     "action.cancel": "取消",
     "action.confirm": "确认",
+    "action.openInVSCode": "在 VS Code 中打开",
+    "action.revealInFolder": "在文件夹中显示",
+
+    "button.saveIn": "保存",
+    "button.upload": "上传",
+
     "desc.config.hintComment": "请填写以下配置信息，保存后关闭此页。",
     "desc.config.host": "主机名称或IP地址",
     "desc.config.password": "密码",
     "desc.config.username": "用户名",
+
     "error.config.connectFailed": "连接失败，{0}",
     "error.config.notFound": "配置信息未找到",
+
     "info.config.addingConfirmation": "确认添加此配置？",
     "info.config.connectFailed": "连接失败，{0}",
     "info.config.parseFailed": "配置信息解析失败，{0}",
     "info.config.privateKeyFile.readFailed": "读取私钥文件 {0} 失败，{1}",
     "info.config.validateFailed": "配置信息校验失败，{0}",
+    "info.download.finished": "已下载 {0}:{1}，保存为 {2}。",
+    "info.upload.finished": "已上传 {0}，保存为 {1}:{2}。",
+
     "option.addConfig": "添加新的 SFTP 配置信息",
     "option.confirmCurrentFolder": "确认当前文件夹",
-    "option.createNewFolder": "创建新文件夹",
+    "option.createFolder": "新建文件夹",
     "option.removeAllConfig": "删除全部 SFTP 配置信息",
+
     "prompt.inputFolderName": "请输入文件夹名称"
 }

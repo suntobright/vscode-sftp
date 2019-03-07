@@ -1,9 +1,7 @@
 {
     "error.authority.different": "远程主机不一致",
-    "error.config.connectFailed": "连接失败，{0}",
-    "error.config.notFound": "配置信息未找到",
-    "error.connPool.uninitialized": "{0} 的连接池未初始化",
-    "error.fileChangeType.unknown": "未知文件改变类型",
+    "error.conn.closed": "连接已关闭",
+    "error.fileChangeType.unknown": "未知的文件改变类型",
 
     "info.createDirectory.failed": "创建目录 {0}:{1} 失败，{2}",
     "info.delete.failed": "删除文件 {0}:{1} 失败，{2}",
