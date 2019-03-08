@@ -1,9 +1,9 @@
 {
-    "sftp.openFolder.title": "Open Remote Folder",
-    "sftp.addFolder.title": "Add Remote Folder",
-    "sftp.openFile.title": "Open Remote File",
-    "sftp.download.title": "Download into Local Folder",
-    "sftp.upload.title": "Upload into Remote Folder",
+    "sftp.openFolder.title": "Open Folder",
+    "sftp.addFolder.title": "Add Folder",
+    "sftp.openFile.title": "Open File",
+    "sftp.download.title": "Download",
+    "sftp.upload.title": "Upload",
     "sftp.removeConfig.title": "Remove Configuration",
     "sftp.help.title": "Help"
 }

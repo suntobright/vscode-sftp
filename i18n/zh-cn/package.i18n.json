@@ -1,9 +1,9 @@
 {
-    "sftp.openFolder.title": "打开远程文件夹",
-    "sftp.addFolder.title": "添加远程文件夹",
-    "sftp.openFile.title": "打开远程文件",
-    "sftp.download.title": "下载到本地文件夹",
-    "sftp.upload.title": "上传到远程文件夹",
+    "sftp.openFolder.title": "打开文件夹",
+    "sftp.addFolder.title": "添加文件夹",
+    "sftp.openFile.title": "打开文件",
+    "sftp.download.title": "下载",
+    "sftp.upload.title": "上传",
     "sftp.removeConfig.title": "删除配置信息",
     "sftp.help.title": "帮助文档"
 }
