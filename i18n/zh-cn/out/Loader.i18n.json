@@ -1,0 +1,12 @@
+{
+    "action.overwrite": "覆盖",
+
+    "error.conn.closed": "连接已关闭",
+    "error.fileType.unknown": "未知的文件类型",
+
+    "info.download": "下载 {0}:{1} 到 {2} 中",
+    "info.download.alreadyExist": "'{0}' 已存在于 '{1}' 中！",
+    "info.ignore.unknownFileType": "因文件类型未知，忽略 {0}。",
+    "info.upload": "上传 {0} 到 {1}:{2} 中",
+    "info.upload.alreadyExist": "'{0}' 已存在于 '{1}:{2}' 中！"
+}

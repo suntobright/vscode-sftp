@@ -1,8 +1,8 @@
 {
     "name": "vscode-sftp",
     "displayName": "VS Code SFTP",
-    "description": "SFTP File System for VS Code.",
-    "version": "1.0.0",
+    "description": "Edit remote Linux files directly in VS Code.",
+    "version": "1.1.0",
     "publisher": "suntobright",
     "repository": {
         "type": "git",
@@ -19,6 +19,9 @@
     "activationEvents": [
         "onCommand:sftp.openFolder",
         "onCommand:sftp.addFolder",
+        "onCommand:sftp.openFile",
+        "onCommand:sftp.download",
+        "onCommand:sftp.upload",
         "onCommand:sftp.removeConfig",
         "onCommand:sftp.help",
         "onFileSystem:sftp"
@@ -37,6 +40,31 @@
                 "category": "SFTP"
             },
             {
+                "command": "sftp.openFile",
+                "title": "%sftp.openFile.title%",
+                "category": "SFTP"
+            },
+            {
+                "command": "sftp.download",
+                "title": "%sftp.download.title%",
+                "category": "SFTP"
+            },
+            {
+                "command": "sftp.upload",
+                "title": "%sftp.upload.title%",
+                "category": "SFTP"
+            },
+            {
+                "command": "sftp.uploadFolder",
+                "title": "%sftp.uploadFolder.title%",
+                "category": "SFTP"
+            },
+            {
+                "command": "sftp.uploadFile",
+                "title": "%sftp.uploadFile.title%",
+                "category": "SFTP"
+            },
+            {
                 "command": "sftp.removeConfig",
                 "title": "%sftp.removeConfig.title%",
                 "category": "SFTP"
@@ -47,6 +75,51 @@
                 "category": "SFTP"
             }
         ],
+        "menus": {
+            "commandPalette": [
+                {
+                    "command": "sftp.upload",
+                    "when": "!isWindows"
+                },
+                {
+                    "command": "sftp.uploadFolder",
+                    "when": "isWindows"
+                },
+                {
+                    "command": "sftp.uploadFile",
+                    "when": "isWindows"
+                }
+            ],
+            "explorer/context": [
+                {
+                    "command": "sftp.download",
+                    "when": "resourceScheme == sftp",
+                    "group": "sftp"
+                },
+                {
+                    "command": "sftp.upload",
+                    "when": "resourceScheme == sftp && explorerResourceIsFolder && !isWindows",
+                    "group": "sftp"
+                },
+                {
+                    "command": "sftp.uploadFolder",
+                    "when": "resourceScheme == sftp && explorerResourceIsFolder && isWindows",
+                    "group": "sftp"
+                },
+                {
+                    "command": "sftp.uploadFile",
+                    "when": "resourceScheme == sftp && explorerResourceIsFolder && isWindows",
+                    "group": "sftp"
+                }
+            ],
+            "editor/context": [
+                {
+                    "command": "sftp.download",
+                    "when": "resourceScheme == sftp",
+                    "group": "sftp"
+                }
+            ]
+        },
         "jsonValidation": [
             {
                 "fileMatch": "sftpConfig.json",
@@ -60,11 +133,14 @@
         "postinstall": "node ./node_modules/vscode/bin/install"
     },
     "devDependencies": {
+        "@commitlint/cli": "^7.5.2",
+        "@commitlint/config-conventional": "^7.5.0",
         "@types/bytes": "^3.0.0",
         "@types/fs-extra": "^5.0.5",
         "@types/lodash": "^4.14.121",
         "@types/multimatch": "^2.1.3",
         "@types/node": "^11.9.5",
+        "@types/opn": "^5.1.0",
         "@types/p-event": "^1.3.0",
         "@types/ssh2": "^0.5.38",
         "@types/ssh2-streams": "^0.1.5",
@@ -72,6 +148,7 @@
         "gulp": "^4.0.0",
         "gulp-sourcemaps": "^2.6.5",
         "gulp-typescript": "^5.0.0",
+        "husky": "^1.3.1",
         "tslint": "^5.13.0",
         "typescript": "^3.3.3333",
         "vsce": "^1.57.1",
@@ -84,9 +161,15 @@
         "fs-extra": "^7.0.1",
         "lodash": "^4.17.11",
         "multimatch": "^3.0.0",
+        "opn": "^5.4.0",
         "p-event": "^2.3.1",
         "ssh2": "^0.8.2",
         "ssh2-streams": "^0.4.2",
         "vscode-nls": "^4.0.0"
+    },
+    "husky": {
+        "hooks": {
+            "commit-msg": "commitlint -E HUSKY_GIT_PARAMS"
+        }
     }
 }
