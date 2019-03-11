@@ -55,6 +55,16 @@
                 "category": "SFTP"
             },
             {
+                "command": "sftp.uploadFolder",
+                "title": "%sftp.uploadFolder.title%",
+                "category": "SFTP"
+            },
+            {
+                "command": "sftp.uploadFile",
+                "title": "%sftp.uploadFile.title%",
+                "category": "SFTP"
+            },
+            {
                 "command": "sftp.removeConfig",
                 "title": "%sftp.removeConfig.title%",
                 "category": "SFTP"
@@ -66,6 +76,20 @@
             }
         ],
         "menus": {
+            "commandPalette": [
+                {
+                    "command": "sftp.upload",
+                    "when": "!isWindows"
+                },
+                {
+                    "command": "sftp.uploadFolder",
+                    "when": "isWindows"
+                },
+                {
+                    "command": "sftp.uploadFile",
+                    "when": "isWindows"
+                }
+            ],
             "explorer/context": [
                 {
                     "command": "sftp.download",
@@ -74,7 +98,17 @@
                 },
                 {
                     "command": "sftp.upload",
-                    "when": "resourceScheme == sftp && explorerResourceIsFolder",
+                    "when": "resourceScheme == sftp && explorerResourceIsFolder && !isWindows",
+                    "group": "sftp"
+                },
+                {
+                    "command": "sftp.uploadFolder",
+                    "when": "resourceScheme == sftp && explorerResourceIsFolder && isWindows",
+                    "group": "sftp"
+                },
+                {
+                    "command": "sftp.uploadFile",
+                    "when": "resourceScheme == sftp && explorerResourceIsFolder && isWindows",
                     "group": "sftp"
                 }
             ],

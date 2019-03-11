@@ -123,19 +123,10 @@ export class Loader {
                 case vscode.FileType.File | vscode.FileType.SymbolicLink:
                 case vscode.FileType.Directory | vscode.FileType.SymbolicLink:
                 case vscode.FileType.Unknown | vscode.FileType.SymbolicLink:
-                    const targetPath: string = path.posix.isAbsolute(subFileInfo.target)
-                        ? path.posix.resolve(srcFolder, subFileInfo.target)
-                        : subFileInfo.target;
-                    if (os.platform() === 'win32'
-                        && subFileInfo.type !== (vscode.FileType.Unknown | vscode.FileType.SymbolicLink)
-                    ) {
-                        await fs.symlink(
-                            path.join(...targetPath.split(path.posix.sep)),
-                            dstSubPath,
-                            (subFileInfo.type & vscode.FileType.File) === vscode.FileType.File ? 'file' : 'dir'
-                        );
-                        break;
-                    } else if (os.platform() !== 'win32') {
+                    if (os.platform() !== 'win32') {
+                        const targetPath: string = path.posix.isAbsolute(subFileInfo.target)
+                            ? path.posix.resolve(srcFolder, subFileInfo.target)
+                            : subFileInfo.target;
                         await fs.symlink(path.join(...targetPath.split(path.posix.sep)), dstSubPath);
                         break;
                     }
@@ -351,7 +342,7 @@ export class Loader {
                 token: vscode.CancellationToken
             ): Promise<DstInfo | undefined> => {
                 const basename: string = path.basename(srcUri.fsPath);
-                const dstPath: string = path.join(dstFolderUri.path, basename);
+                const dstPath: string = path.posix.join(dstFolderUri.path, basename);
 
                 return this._connPool.withConn<DstInfo | undefined>(
                     dstFolderUri.authority,

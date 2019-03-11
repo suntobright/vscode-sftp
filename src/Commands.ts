@@ -388,7 +388,7 @@ export class Commands {
 
     public async download(srcUri: vscode.Uri | undefined): Promise<void> {
         await this._withErrorHandled(async () => {
-            if (isNil(srcUri)) {
+            if (isNil(srcUri) || isNil(srcUri.scheme) || srcUri.scheme !== consts.scheme) {
                 // tslint:disable-next-line:no-parameter-reassignment
                 srcUri = await this._promptUserInputUri({
                     canBeFile: true,
@@ -435,11 +435,11 @@ export class Commands {
         });
     }
 
-    public async upload(dstFolderUri: vscode.Uri | undefined): Promise<void> {
+    public async upload(srcFileType: vscode.FileType, dstFolderUri: vscode.Uri | undefined): Promise<void> {
         await this._withErrorHandled(async () => {
             const srcUris: vscode.Uri[] | undefined = await vscode.window.showOpenDialog({
-                canSelectFiles: true,
-                canSelectFolders: true,
+                canSelectFiles: srcFileType !== vscode.FileType.Directory,
+                canSelectFolders: srcFileType !== vscode.FileType.File,
                 canSelectMany: false,
                 openLabel: localize('button.upload', "Upload")
             });
@@ -447,7 +447,7 @@ export class Commands {
                 return;
             }
 
-            if (isNil(dstFolderUri)) {
+            if (isNil(dstFolderUri) || isNil(dstFolderUri.scheme) || dstFolderUri.scheme !== consts.scheme) {
                 // tslint:disable-next-line:no-parameter-reassignment
                 dstFolderUri = await this._promptUserInputUri({ canBeFolder: true });
                 if (isNil(dstFolderUri)) {

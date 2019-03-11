@@ -4,6 +4,8 @@
     "sftp.openFile.title": "Open File",
     "sftp.download.title": "Download",
     "sftp.upload.title": "Upload",
+    "sftp.uploadFolder.title": "Upload Folder",
+    "sftp.uploadFile.title": "Upload File",
     "sftp.removeConfig.title": "Remove Configuration",
     "sftp.help.title": "Help"
 }

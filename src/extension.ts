@@ -2,6 +2,13 @@
 
 import { isNil } from 'lodash';
 import * as vscode from 'vscode';
+
+const nlsConfig: { _languagePackSupport: boolean } = JSON.parse(
+    isNil(process.env.VSCODE_NLS_CONFIG) ? '{}' : process.env.VSCODE_NLS_CONFIG
+);
+nlsConfig._languagePackSupport = false;
+process.env.VSCODE_NLS_CONFIG = JSON.stringify(nlsConfig);
+
 import * as nls from 'vscode-nls';
 
 nls.config(JSON.parse(isNil(process.env.VSCODE_NLS_CONFIG) ? '{}' : process.env.VSCODE_NLS_CONFIG))();
@@ -56,7 +63,19 @@ export function activate(context: vscode.ExtensionContext): void {
 
     command = vscode.commands.registerCommand(
         'sftp.upload',
-        async (dstFolderUri: vscode.Uri | undefined) => commands.upload(dstFolderUri)
+        async (dstFolderUri: vscode.Uri | undefined) => commands.upload(vscode.FileType.Unknown, dstFolderUri)
+    );
+    context.subscriptions.push(command);
+
+    command = vscode.commands.registerCommand(
+        'sftp.uploadFolder',
+        async (dstFolderUri: vscode.Uri | undefined) => commands.upload(vscode.FileType.Directory, dstFolderUri)
+    );
+    context.subscriptions.push(command);
+
+    command = vscode.commands.registerCommand(
+        'sftp.uploadFile',
+        async (dstFolderUri: vscode.Uri | undefined) => commands.upload(vscode.FileType.File, dstFolderUri)
     );
     context.subscriptions.push(command);
 
