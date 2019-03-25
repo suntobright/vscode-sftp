@@ -117,7 +117,7 @@ export class Commands {
 
                         if (!isNil(config.privateKeyFile)) {
                             try {
-                                config.privateKey = await fs.readFile(config.privateKeyFile);
+                                config.privateKey = (await fs.readFile(config.privateKeyFile)).toString();
                             } catch (e) {
                                 void vscode.window.showWarningMessage(
                                     localize(
@@ -145,6 +145,10 @@ export class Commands {
                         authority = `${config.username}@${config.host}`;
                         if (!isNil(config.port) && config.port !== consts.defaultPort) {
                             authority += `:${config.port}`;
+                        }
+
+                        if (!isNil(config.privateKeyFile)) {
+                            config.privateKeyFile = undefined;
                         }
 
                         this._connPool.pushConn(authority, conn);
