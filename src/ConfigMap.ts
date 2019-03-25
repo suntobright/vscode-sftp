@@ -11,7 +11,7 @@ export interface Config {
     username: string;
     password?: string;
     passphrase?: string;
-    privateKey?: Buffer;
+    privateKey?: string;
     privateKeyFile?: string;
 }
 
