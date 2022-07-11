@@ -59,7 +59,8 @@ export class Commands {
             host: localize('desc.config.host', "hostname_or_IP"),
             port: consts.defaultPort,
             username: localize('desc.config.username', "username"),
-            password: localize('desc.config.password', "password")
+            password: localize('desc.config.password', "password - if you do not use a password, delete this line."),
+            privateKeyFile: localize('desc.config.privateKeyFile', "/path/to/private/keyfile - if you do not use a keyfile, delete this line.")
         };
         const tempFile: string = path.join(consts.localTempFolder, consts.configFileName);
         await fs.ensureFile(tempFile);
